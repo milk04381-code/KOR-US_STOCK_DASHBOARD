@@ -1,0 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Mar 19 16:06:00 2026
+
+@author: 박승욱
+"""
+
+dash
+plotly
+pandas
+sqlalchemy
+pymysql
+python-dotenv
+gunicorn
