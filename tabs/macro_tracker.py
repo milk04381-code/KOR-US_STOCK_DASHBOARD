@@ -34,7 +34,8 @@ CATEGORY_OPTIONS = [
     {"label": "주택", "value": "주택"},
 ]
 
-INVESTING_EMBED_HTML = """<!DOCTYPE html>
+INVESTING_EMBED_HTML = """
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -69,17 +70,17 @@ INVESTING_EMBED_HTML = """<!DOCTYPE html>
 """
 
 # -------------------------
-# 폭 설정: 가운데 시계열 3칸 정도 보이도록 축소
+# 폭 설정
 # -------------------------
-W_SELECT = 46
-W_NAME = 120
+W_SELECT = 44
+W_NAME = 112
 W_KIND = 54
 W_TIME = 72
 W_CHANGE = 74
-W_SPEED = 54
-W_TREND = 58
-W_RELEASE = 76
-W_ASSET = 68
+W_SPEED = 52
+W_TREND = 56
+W_RELEASE = 78
+W_ASSET = 64
 
 BORDER = "1px solid #333"
 
@@ -146,18 +147,37 @@ def _sticky_top(style, top=0, z=7):
     return s
 
 
-def _th(text, width, align="center", sticky_left=None, sticky_right=None, top=0):
-    style = _base_style(bg="#f2f2f2", align=align)
-    style["width"] = px(width)
-    style["minWidth"] = px(width)
+def _th(
+    text,
+    width=None,
+    row_span=1,
+    col_span=1,
+    align="center",
+    sticky_left=None,
+    sticky_right=None,
+    top=0,
+    bg="#f2f2f2",
+):
+    style = _base_style(bg=bg, align=align)
+
+    if width is not None:
+        style["width"] = px(width)
+        style["minWidth"] = px(width)
+
     style = _sticky_top(style, top=top, z=8)
 
     if sticky_left is not None:
         style = _sticky_left(style, sticky_left, z=9)
+
     if sticky_right is not None:
         style = _sticky_right(style, sticky_right, z=9)
 
-    return html.Th(text, style=style)
+    return html.Th(
+        text,
+        rowSpan=row_span,
+        colSpan=col_span,
+        style=style,
+    )
 
 
 def _td(text, width, align="center", bold=False, sticky_left=None, sticky_right=None):
@@ -167,8 +187,10 @@ def _td(text, width, align="center", bold=False, sticky_left=None, sticky_right=
 
     if bold:
         style["fontWeight"] = "bold"
+
     if sticky_left is not None:
         style = _sticky_left(style, sticky_left)
+
     if sticky_right is not None:
         style = _sticky_right(style, sticky_right)
 
@@ -222,7 +244,10 @@ def _build_one_frequency_table(section, selected_series_codes):
     indicators = section["indicators"]
 
     if not indicators:
-        return html.Div("조건에 맞는 지표가 없습니다.", style={"padding": "12px", "fontSize": "13px", "color": "#666"})
+        return html.Div(
+            "조건에 맞는 지표가 없습니다.",
+            style={"padding": "12px", "fontSize": "13px", "color": "#666"},
+        )
 
     body_rows = [
         _build_indicator_row(item, period_keys, selected_series_codes)
@@ -235,7 +260,10 @@ def _build_one_frequency_table(section, selected_series_codes):
         + W_CHANGE + W_SPEED + W_TREND + W_RELEASE + W_ASSET * 3
     )
 
-    policy_label = "연준 통화정책 국면" if section["frequency"] == "monthly" else "구분"
+    # 지금은 정책 라벨 값은 비워두고, 레이아웃만 유지
+    policy_label = (
+        "연준 통화정책 국면" if section["frequency"] == "monthly" else "구분"
+    )
 
     table = html.Table(
         [
@@ -243,26 +271,24 @@ def _build_one_frequency_table(section, selected_series_codes):
                 [
                     html.Tr(
                         [
-                            _th("선택", W_SELECT, sticky_left=LEFT_SELECT, top=0),
-                            _th("지표명", W_NAME, align="left", sticky_left=LEFT_NAME, top=0),
+                            _th("선택", W_SELECT, row_span=2, sticky_left=LEFT_SELECT, top=0),
+                            _th("지표명", W_NAME, row_span=2, align="left", sticky_left=LEFT_NAME, top=0),
                             _th(policy_label, W_KIND, align="left", sticky_left=LEFT_KIND, top=0),
-                            *[_th("", W_TIME, top=0) for _ in period_keys],
-                            _th("전기 대비 변동", W_CHANGE, sticky_right=RIGHT_CHANGE, top=0),
-                            _th("속도", W_SPEED, sticky_right=RIGHT_SPEED, top=0),
-                            _th("추세", W_TREND, sticky_right=RIGHT_TREND, top=0),
-                            _th("발표일", W_RELEASE, sticky_right=RIGHT_RELEASE, top=0),
-                            _th("자산군별 일중 변동", W_ASSET * 3, sticky_right=0, top=0),
+                            _th("", col_span=max(len(period_keys), 1), top=0),
+                            _th("전기 대비 변동", W_CHANGE, row_span=2, sticky_right=RIGHT_CHANGE, top=0),
+                            _th("속도", W_SPEED, row_span=2, sticky_right=RIGHT_SPEED, top=0),
+                            _th("추세", W_TREND, row_span=2, sticky_right=RIGHT_TREND, top=0),
+                            _th("발표일", W_RELEASE, row_span=2, sticky_right=RIGHT_RELEASE, top=0),
+                            _th("자산군별 일중 변동", col_span=3, sticky_right=0, top=0),
                         ]
                     ),
                     html.Tr(
                         [
-                            _th("", W_SELECT, sticky_left=LEFT_SELECT, top=31),
-                            _th("", W_NAME, sticky_left=LEFT_NAME, top=31),
-                            _th("기준시기", W_KIND, align="left", sticky_left=LEFT_KIND, top=31),
-                            *[_th(key, W_TIME, top=31) for key in period_keys],
-                            _th("주식", W_ASSET, sticky_right=RIGHT_STOCK, top=31),
-                            _th("채권", W_ASSET, sticky_right=RIGHT_BOND, top=31),
-                            _th("외환", W_ASSET, sticky_right=RIGHT_FX, top=31),
+                            _th("기준시기", W_KIND, align="left", sticky_left=LEFT_KIND, top=29),
+                            *[_th(key, W_TIME, top=29) for key in period_keys],
+                            _th("주식", W_ASSET, sticky_right=RIGHT_STOCK, top=29),
+                            _th("채권", W_ASSET, sticky_right=RIGHT_BOND, top=29),
+                            _th("외환", W_ASSET, sticky_right=RIGHT_FX, top=29),
                         ]
                     ),
                 ]
@@ -280,7 +306,10 @@ def _build_one_frequency_table(section, selected_series_codes):
 
     return html.Div(
         [
-            html.H4(f"{section['frequency_label']} 지표", style={"marginTop": "0", "marginBottom": "8px"}),
+            html.H4(
+                f"{section['frequency_label']} 지표",
+                style={"marginTop": "0", "marginBottom": "8px"},
+            ),
             html.Div(
                 table,
                 style={
@@ -301,7 +330,10 @@ def _build_one_frequency_table(section, selected_series_codes):
 def _build_tables(payload, selected_series_codes):
     sections = payload.get("sections", [])
     if not sections:
-        return html.Div("조건에 맞는 시계열이 없습니다.", style={"padding": "20px", "fontSize": "14px", "color": "#666"})
+        return html.Div(
+            "조건에 맞는 시계열이 없습니다.",
+            style={"padding": "20px", "fontSize": "14px", "color": "#666"},
+        )
 
     return html.Div([
         _build_one_frequency_table(section, selected_series_codes)
@@ -376,7 +408,7 @@ def get_layout():
                                         },
                                     ),
                                     html.Div(
-                                        "좌측 고정 열과 우측 요약열은 고정하고, 가운데 시계열만 좌우 스크롤됩니다.",
+                                        "좌측 3열과 우측 요약열은 고정되고, 가운데 시계열만 좌우 스크롤됩니다.",
                                         style={"fontSize": "13px", "color": "#666", "marginBottom": "10px"},
                                     ),
                                     html.Div(
