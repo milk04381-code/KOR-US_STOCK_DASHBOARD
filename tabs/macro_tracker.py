@@ -244,86 +244,120 @@ def _build_one_frequency_table(section, selected_series_codes):
     indicators = section["indicators"]
 
     if not indicators:
-        return html.Div(
-            "조건에 맞는 지표가 없습니다.",
-            style={"padding": "12px", "fontSize": "13px", "color": "#666"},
-        )
+        return html.Div("데이터 없음")
 
-    body_rows = [
-        _build_indicator_row(item, period_keys, selected_series_codes)
-        for item in indicators
-    ]
+    # -------------------------
+    # 좌측 테이블
+    # -------------------------
+    left_header = html.Table([
+        html.Thead([
+            html.Tr([
+                html.Th("선택"),
+                html.Th("지표명"),
+                html.Th("연준 통화정책 국면"),
+            ])
+        ])
+    ])
 
-    table_min_width = (
-        W_SELECT + W_NAME + W_KIND
-        + len(period_keys) * W_TIME
-        + W_CHANGE + W_SPEED + W_TREND + W_RELEASE + W_ASSET * 3
-    )
+    left_body = html.Table([
+        html.Tbody([
+            html.Tr([
+                html.Td(_checkbox_cell(item["series_code"], selected_series_codes)),
+                html.Td(item["indicator"]),
+                html.Td(""),  # 정책 국면 (빈칸)
+            ])
+            for item in indicators
+        ])
+    ])
 
-    # 지금은 정책 라벨 값은 비워두고, 레이아웃만 유지
-    policy_label = (
-        "연준 통화정책 국면" if section["frequency"] == "monthly" else "구분"
-    )
+    # -------------------------
+    # 가운데 테이블 (스크롤)
+    # -------------------------
+    middle_header = html.Table([
+        html.Thead([
+            html.Tr([
+                html.Th("기준시기"),
+                *[html.Th(k) for k in period_keys]
+            ])
+        ])
+    ])
 
-    table = html.Table(
-        [
-            html.Thead(
-                [
-                    html.Tr(
-                        [
-                            _th("선택", W_SELECT, row_span=2, sticky_left=LEFT_SELECT, top=0),
-                            _th("지표명", W_NAME, row_span=2, align="left", sticky_left=LEFT_NAME, top=0),
-                            _th(policy_label, W_KIND, align="left", sticky_left=LEFT_KIND, top=0),
-                            _th("", col_span=max(len(period_keys), 1), top=0),
-                            _th("전기 대비 변동", W_CHANGE, row_span=2, sticky_right=RIGHT_CHANGE, top=0),
-                            _th("속도", W_SPEED, row_span=2, sticky_right=RIGHT_SPEED, top=0),
-                            _th("추세", W_TREND, row_span=2, sticky_right=RIGHT_TREND, top=0),
-                            _th("발표일", W_RELEASE, row_span=2, sticky_right=RIGHT_RELEASE, top=0),
-                            _th("자산군별 일중 변동", col_span=3, sticky_right=0, top=0),
-                        ]
-                    ),
-                    html.Tr(
-                        [
-                            _th("기준시기", W_KIND, align="left", sticky_left=LEFT_KIND, top=29),
-                            *[_th(key, W_TIME, top=29) for key in period_keys],
-                            _th("주식", W_ASSET, sticky_right=RIGHT_STOCK, top=29),
-                            _th("채권", W_ASSET, sticky_right=RIGHT_BOND, top=29),
-                            _th("외환", W_ASSET, sticky_right=RIGHT_FX, top=29),
-                        ]
-                    ),
-                ]
-            ),
-            html.Tbody(body_rows),
-        ],
+    middle_body = html.Table([
+        html.Tbody([
+            html.Tr([
+                html.Td(""),
+                *[html.Td(item["actual"].get(k, "")) for k in period_keys]
+            ])
+            for item in indicators
+        ])
+    ])
+
+    middle = html.Div(
+        [middle_header, middle_body],
         style={
-            "width": "100%",
-            "minWidth": px(table_min_width),
-            "borderCollapse": "separate",
-            "borderSpacing": "0",
-            "backgroundColor": "white",
-        },
+            "overflowX": "auto",
+            "maxWidth": "600px",
+        }
     )
 
+    # -------------------------
+    # 우측 테이블
+    # -------------------------
+    right_header = html.Table([
+        html.Thead([
+            html.Tr([
+                html.Th("전기 대비 변동"),
+                html.Th("속도"),
+                html.Th("추세"),
+                html.Th("발표일"),
+                html.Th("주식"),
+                html.Th("채권"),
+                html.Th("외환"),
+            ])
+        ])
+    ])
+
+    right_body = html.Table([
+        html.Tbody([
+            html.Tr([
+                html.Td(item.get("change_display", "")),
+                html.Td(item.get("speed", "")),
+                html.Td(item.get("trend", "")),
+                html.Td(item.get("release_date", "")),
+                html.Td(item.get("asset_moves", {}).get("stock", "")),
+                html.Td(item.get("asset_moves", {}).get("bond", "")),
+                html.Td(item.get("asset_moves", {}).get("fx", "")),
+            ])
+            for item in indicators
+        ])
+    ])
+
+    # -------------------------
+    # 전체 3분할 레이아웃
+    # -------------------------
     return html.Div(
         [
-            html.H4(
-                f"{section['frequency_label']} 지표",
-                style={"marginTop": "0", "marginBottom": "8px"},
-            ),
+            html.H4(section["frequency_label"] + " 지표"),
+
             html.Div(
-                table,
-                style={
-                    "width": "100%",
-                    "maxWidth": "100%",
-                    "overflowX": "auto",
-                    "overflowY": "auto",
-                    "maxHeight": "390px",
-                    "border": "1px solid #ddd",
-                    "backgroundColor": "white",
-                },
+                [
+                    html.Div(left_header),
+                    html.Div(middle_header),
+                    html.Div(right_header),
+                ],
+                style={"display": "flex"}
+            ),
+
+            html.Div(
+                [
+                    html.Div(left_body),
+                    middle,
+                    html.Div(right_body),
+                ],
+                style={"display": "flex"}
             ),
         ],
-        style={"marginBottom": "16px"},
+        style={"marginBottom": "20px"}
     )
 
 
