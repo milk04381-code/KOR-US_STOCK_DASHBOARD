@@ -14,6 +14,7 @@ Created on Wed Apr  8 13:27:30 2026
 # 4. 표는 좌우측 고정 열 + 내부 가로/세로 스크롤
 # 5. 표 가시폭은 좌측 패널 안으로 제한하여 우측 차트 유지
 
+
 from dash import dcc, html, Input, Output, ALL
 import plotly.graph_objs as go
 
@@ -73,36 +74,29 @@ INVESTING_EMBED_HTML = """
 # 폭 설정
 # -------------------------
 W_SELECT = 44
-W_NAME = 112
-W_KIND = 54
+W_NAME = 120
+W_POLICY = 88
+
+W_TIME_LABEL = 72
 W_TIME = 72
-W_CHANGE = 74
-W_SPEED = 52
-W_TREND = 56
-W_RELEASE = 78
-W_ASSET = 64
+
+W_CHANGE = 78
+W_SPEED = 54
+W_TREND = 58
+W_RELEASE = 82
+W_ASSET = 66
+
+ROW_HEIGHT = 38
+HEAD_HEIGHT = 34
 
 BORDER = "1px solid #333"
 
-LEFT_SELECT = 0
-LEFT_NAME = W_SELECT
-LEFT_KIND = W_SELECT + W_NAME
 
-RIGHT_FX = 0
-RIGHT_BOND = W_ASSET
-RIGHT_STOCK = W_ASSET * 2
-RIGHT_RELEASE = W_ASSET * 3
-RIGHT_TREND = W_ASSET * 3 + W_RELEASE
-RIGHT_SPEED = W_ASSET * 3 + W_RELEASE + W_TREND
-RIGHT_CHANGE = W_ASSET * 3 + W_RELEASE + W_TREND + W_SPEED
-
-
-def px(v):
-    return f"{v}px"
-
-
-def _base_style(bg="white", align="center"):
-    return {
+# -------------------------
+# 공통 스타일
+# -------------------------
+def _cell_style(width, bg="white", align="center", bold=False):
+    style = {
         "border": BORDER,
         "padding": "4px 6px",
         "textAlign": align,
@@ -111,253 +105,274 @@ def _base_style(bg="white", align="center"):
         "fontSize": "12px",
         "backgroundColor": bg,
         "boxSizing": "border-box",
+        "width": f"{width}px",
+        "minWidth": f"{width}px",
+        "maxWidth": f"{width}px",
+        "height": f"{ROW_HEIGHT}px",
+        "lineHeight": "1.2",
+        "overflow": "hidden",
+        "textOverflow": "ellipsis",
+    }
+    if bold:
+        style["fontWeight"] = "bold"
+    return style
+
+
+def _head_style(width=None, bg="#f2f2f2", align="center", height=HEAD_HEIGHT):
+    style = {
+        "border": BORDER,
+        "padding": "4px 6px",
+        "textAlign": align,
+        "verticalAlign": "middle",
+        "whiteSpace": "nowrap",
+        "fontSize": "12px",
+        "backgroundColor": bg,
+        "boxSizing": "border-box",
+        "height": f"{height}px",
+        "lineHeight": "1.2",
+        "overflow": "hidden",
+        "textOverflow": "ellipsis",
+    }
+    if width is not None:
+        style["width"] = f"{width}px"
+        style["minWidth"] = f"{width}px"
+        style["maxWidth"] = f"{width}px"
+    return style
+
+
+def _table_base_style():
+    return {
+        "borderCollapse": "collapse",
+        "tableLayout": "fixed",
+        "backgroundColor": "white",
     }
 
 
-def _sticky_left(style, left, z=6):
-    s = dict(style)
-    s.update({
-        "position": "sticky",
-        "left": px(left),
-        "zIndex": z,
-        "backgroundColor": style.get("backgroundColor", "white"),
-    })
-    return s
-
-
-def _sticky_right(style, right, z=6):
-    s = dict(style)
-    s.update({
-        "position": "sticky",
-        "right": px(right),
-        "zIndex": z,
-        "backgroundColor": style.get("backgroundColor", "white"),
-    })
-    return s
-
-
-def _sticky_top(style, top=0, z=7):
-    s = dict(style)
-    s.update({
-        "position": "sticky",
-        "top": px(top),
-        "zIndex": z,
-        "backgroundColor": style.get("backgroundColor", "#f2f2f2"),
-    })
-    return s
-
-
-def _th(
-    text,
-    width=None,
-    row_span=1,
-    col_span=1,
-    align="center",
-    sticky_left=None,
-    sticky_right=None,
-    top=0,
-    bg="#f2f2f2",
-):
-    style = _base_style(bg=bg, align=align)
-
-    if width is not None:
-        style["width"] = px(width)
-        style["minWidth"] = px(width)
-
-    style = _sticky_top(style, top=top, z=8)
-
-    if sticky_left is not None:
-        style = _sticky_left(style, sticky_left, z=9)
-
-    if sticky_right is not None:
-        style = _sticky_right(style, sticky_right, z=9)
-
-    return html.Th(
-        text,
-        rowSpan=row_span,
-        colSpan=col_span,
-        style=style,
-    )
-
-
-def _td(text, width, align="center", bold=False, sticky_left=None, sticky_right=None):
-    style = _base_style(bg="white", align=align)
-    style["width"] = px(width)
-    style["minWidth"] = px(width)
-
-    if bold:
-        style["fontWeight"] = "bold"
-
-    if sticky_left is not None:
-        style = _sticky_left(style, sticky_left)
-
-    if sticky_right is not None:
-        style = _sticky_right(style, sticky_right)
-
-    return html.Td(text, style=style)
-
-
-def _checkbox_cell(series_code, selected_series_codes):
+def _checkbox_control(series_code, selected_series_codes):
     checked = [series_code] if series_code in selected_series_codes else []
-
-    return html.Td(
-        dcc.Checklist(
-            id={"type": "macro-checklist", "index": series_code},
-            options=[{"label": "", "value": series_code}],
-            value=checked,
-            style={"display": "flex", "justifyContent": "center"},
-            inputStyle={"marginRight": "0px"},
-        ),
-        style=_sticky_left(
-            {
-                **_base_style(bg="white", align="center"),
-                "width": px(W_SELECT),
-                "minWidth": px(W_SELECT),
-            },
-            LEFT_SELECT,
-        ),
+    return dcc.Checklist(
+        id={"type": "macro-checklist", "index": series_code},
+        options=[{"label": "", "value": series_code}],
+        value=checked,
+        style={"display": "flex", "justifyContent": "center"},
+        inputStyle={"marginRight": "0px"},
     )
 
 
-def _build_indicator_row(item, period_keys, selected_series_codes):
-    actual_map = item["actual"]
-
-    return html.Tr(
+# -------------------------
+# 좌/중/우 패널 빌더
+# -------------------------
+def _build_left_table(indicators, selected_series_codes):
+    header = html.Table(
         [
-            _checkbox_cell(item["series_code"], selected_series_codes),
-            _td(item["indicator"], W_NAME, align="left", bold=True, sticky_left=LEFT_NAME),
-            _td("실제", W_KIND, align="left", sticky_left=LEFT_KIND),
-            *[_td(actual_map.get(key, ""), W_TIME) for key in period_keys],
-            _td(item.get("change_display", ""), W_CHANGE, sticky_right=RIGHT_CHANGE),
-            _td(item.get("speed", ""), W_SPEED, sticky_right=RIGHT_SPEED),
-            _td(item.get("trend", ""), W_TREND, sticky_right=RIGHT_TREND),
-            _td(item.get("release_date", ""), W_RELEASE, sticky_right=RIGHT_RELEASE),
-            _td(item.get("asset_moves", {}).get("stock", ""), W_ASSET, align="right", sticky_right=RIGHT_STOCK),
-            _td(item.get("asset_moves", {}).get("bond", ""), W_ASSET, align="right", sticky_right=RIGHT_BOND),
-            _td(item.get("asset_moves", {}).get("fx", ""), W_ASSET, align="right", sticky_right=RIGHT_FX),
+            html.Thead(
+                [
+                    html.Tr(
+                        [
+                            html.Th("선택", rowSpan=2, style=_head_style(W_SELECT)),
+                            html.Th("지표명", rowSpan=2, style=_head_style(W_NAME, align="left")),
+                            html.Th("연준 통화정책 국면", rowSpan=1, style=_head_style(W_POLICY, align="center")),
+                        ]
+                    ),
+                    html.Tr(
+                        [
+                            html.Th("", style=_head_style(W_POLICY)),
+                        ]
+                    ),
+                ]
+            ),
+            html.Tbody(
+                [
+                    html.Tr(
+                        [
+                            html.Td(_checkbox_control(item["series_code"], selected_series_codes), style=_cell_style(W_SELECT)),
+                            html.Td(item["indicator"], style=_cell_style(W_NAME, align="left", bold=True)),
+                            html.Td("", style=_cell_style(W_POLICY, align="center")),
+                        ]
+                    )
+                    for item in indicators
+                ]
+            ),
+        ],
+        style={
+            **_table_base_style(),
+            "width": f"{W_SELECT + W_NAME + W_POLICY}px",
+            "minWidth": f"{W_SELECT + W_NAME + W_POLICY}px",
+        },
+    )
+    return header
+
+
+def _build_middle_table(period_keys, indicators):
+    total_width = W_TIME_LABEL + (len(period_keys) * W_TIME)
+
+    header_row_1 = html.Tr(
+        [
+            html.Th("기준시기", style=_head_style(W_TIME_LABEL, align="left")),
+            *[html.Th("", style=_head_style(W_TIME)) for _ in period_keys],
         ]
     )
 
+    header_row_2 = html.Tr(
+        [
+            html.Th("", style=_head_style(W_TIME_LABEL, align="left")),
+            *[html.Th(key, style=_head_style(W_TIME)) for key in period_keys],
+        ]
+    )
 
+    body_rows = []
+    for item in indicators:
+        actual_map = item["actual"]
+        body_rows.append(
+            html.Tr(
+                [
+                    html.Td("실제", style=_cell_style(W_TIME_LABEL, align="left")),
+                    *[
+                        html.Td(actual_map.get(key, ""), style=_cell_style(W_TIME))
+                        for key in period_keys
+                    ],
+                ]
+            )
+        )
+
+    table = html.Table(
+        [
+            html.Thead([header_row_1, header_row_2]),
+            html.Tbody(body_rows),
+        ],
+        style={
+            **_table_base_style(),
+            "width": f"{total_width}px",
+            "minWidth": f"{total_width}px",
+        },
+    )
+
+    return html.Div(
+        table,
+        style={
+            "overflowX": "auto",
+            "overflowY": "hidden",
+            "width": "100%",
+            "borderTop": BORDER,
+            "borderBottom": BORDER,
+        },
+    )
+
+
+def _build_right_table(indicators):
+    total_width = W_CHANGE + W_SPEED + W_TREND + W_RELEASE + (W_ASSET * 3)
+
+    header = html.Table(
+        [
+            html.Thead(
+                [
+                    html.Tr(
+                        [
+                            html.Th("전기 대비 변동", rowSpan=2, style=_head_style(W_CHANGE)),
+                            html.Th("속도", rowSpan=2, style=_head_style(W_SPEED)),
+                            html.Th("추세", rowSpan=2, style=_head_style(W_TREND)),
+                            html.Th("발표일", rowSpan=2, style=_head_style(W_RELEASE)),
+                            html.Th("자산군별 일중 변동", colSpan=3, style=_head_style(W_ASSET * 3)),
+                        ]
+                    ),
+                    html.Tr(
+                        [
+                            html.Th("주식", style=_head_style(W_ASSET)),
+                            html.Th("채권", style=_head_style(W_ASSET)),
+                            html.Th("외환", style=_head_style(W_ASSET)),
+                        ]
+                    ),
+                ]
+            ),
+            html.Tbody(
+                [
+                    html.Tr(
+                        [
+                            html.Td(item.get("change_display", ""), style=_cell_style(W_CHANGE)),
+                            html.Td(item.get("speed", ""), style=_cell_style(W_SPEED)),
+                            html.Td(item.get("trend", ""), style=_cell_style(W_TREND)),
+                            html.Td(item.get("release_date", ""), style=_cell_style(W_RELEASE)),
+                            html.Td(item.get("asset_moves", {}).get("stock", ""), style=_cell_style(W_ASSET)),
+                            html.Td(item.get("asset_moves", {}).get("bond", ""), style=_cell_style(W_ASSET)),
+                            html.Td(item.get("asset_moves", {}).get("fx", ""), style=_cell_style(W_ASSET)),
+                        ]
+                    )
+                    for item in indicators
+                ]
+            ),
+        ],
+        style={
+            **_table_base_style(),
+            "width": f"{total_width}px",
+            "minWidth": f"{total_width}px",
+        },
+    )
+    return header
+
+
+# -------------------------
+# 주기별 표 하나
+# -------------------------
 def _build_one_frequency_table(section, selected_series_codes):
     period_keys = section["period_keys"]
     indicators = section["indicators"]
 
     if not indicators:
-        return html.Div("데이터 없음")
+        return html.Div(
+            "데이터 없음",
+            style={"padding": "12px", "fontSize": "13px", "color": "#666"},
+        )
 
-    # -------------------------
-    # 좌측 테이블
-    # -------------------------
-    left_header = html.Table([
-        html.Thead([
-            html.Tr([
-                html.Th("선택"),
-                html.Th("지표명"),
-                html.Th("연준 통화정책 국면"),
-            ])
-        ])
-    ])
+    left_table = _build_left_table(indicators, selected_series_codes)
+    middle_table = _build_middle_table(period_keys, indicators)
+    right_table = _build_right_table(indicators)
 
-    left_body = html.Table([
-        html.Tbody([
-            html.Tr([
-                html.Td(_checkbox_cell(item["series_code"], selected_series_codes)),
-                html.Td(item["indicator"]),
-                html.Td(""),  # 정책 국면 (빈칸)
-            ])
-            for item in indicators
-        ])
-    ])
+    left_width = W_SELECT + W_NAME + W_POLICY
+    right_width = W_CHANGE + W_SPEED + W_TREND + W_RELEASE + (W_ASSET * 3)
 
-    # -------------------------
-    # 가운데 테이블 (스크롤)
-    # -------------------------
-    middle_header = html.Table([
-        html.Thead([
-            html.Tr([
-                html.Th("기준시기"),
-                *[html.Th(k) for k in period_keys]
-            ])
-        ])
-    ])
-
-    middle_body = html.Table([
-        html.Tbody([
-            html.Tr([
-                html.Td(""),
-                *[html.Td(item["actual"].get(k, "")) for k in period_keys]
-            ])
-            for item in indicators
-        ])
-    ])
-
-    middle = html.Div(
-        [middle_header, middle_body],
-        style={
-            "overflowX": "auto",
-            "maxWidth": "600px",
-        }
-    )
-
-    # -------------------------
-    # 우측 테이블
-    # -------------------------
-    right_header = html.Table([
-        html.Thead([
-            html.Tr([
-                html.Th("전기 대비 변동"),
-                html.Th("속도"),
-                html.Th("추세"),
-                html.Th("발표일"),
-                html.Th("주식"),
-                html.Th("채권"),
-                html.Th("외환"),
-            ])
-        ])
-    ])
-
-    right_body = html.Table([
-        html.Tbody([
-            html.Tr([
-                html.Td(item.get("change_display", "")),
-                html.Td(item.get("speed", "")),
-                html.Td(item.get("trend", "")),
-                html.Td(item.get("release_date", "")),
-                html.Td(item.get("asset_moves", {}).get("stock", "")),
-                html.Td(item.get("asset_moves", {}).get("bond", "")),
-                html.Td(item.get("asset_moves", {}).get("fx", "")),
-            ])
-            for item in indicators
-        ])
-    ])
-
-    # -------------------------
-    # 전체 3분할 레이아웃
-    # -------------------------
     return html.Div(
         [
-            html.H4(section["frequency_label"] + " 지표"),
-
-            html.Div(
-                [
-                    html.Div(left_header),
-                    html.Div(middle_header),
-                    html.Div(right_header),
-                ],
-                style={"display": "flex"}
+            html.H4(
+                f"{section['frequency_label']} 지표",
+                style={"marginTop": "0", "marginBottom": "8px"},
             ),
-
             html.Div(
                 [
-                    html.Div(left_body),
-                    middle,
-                    html.Div(right_body),
+                    html.Div(
+                        left_table,
+                        style={
+                            "width": f"{left_width}px",
+                            "minWidth": f"{left_width}px",
+                            "flex": "0 0 auto",
+                        },
+                    ),
+                    html.Div(
+                        middle_table,
+                        style={
+                            "flex": "1 1 auto",
+                            "minWidth": "0",
+                        },
+                    ),
+                    html.Div(
+                        right_table,
+                        style={
+                            "width": f"{right_width}px",
+                            "minWidth": f"{right_width}px",
+                            "flex": "0 0 auto",
+                        },
+                    ),
                 ],
-                style={"display": "flex"}
+                style={
+                    "display": "flex",
+                    "alignItems": "flex-start",
+                    "gap": "0px",
+                    "borderLeft": BORDER,
+                    "borderRight": BORDER,
+                    "backgroundColor": "white",
+                },
             ),
         ],
-        style={"marginBottom": "20px"}
+        style={"marginBottom": "18px"},
     )
 
 
@@ -369,10 +384,12 @@ def _build_tables(payload, selected_series_codes):
             style={"padding": "20px", "fontSize": "14px", "color": "#666"},
         )
 
-    return html.Div([
-        _build_one_frequency_table(section, selected_series_codes)
-        for section in sections
-    ])
+    return html.Div(
+        [
+            _build_one_frequency_table(section, selected_series_codes)
+            for section in sections
+        ]
+    )
 
 
 def _build_investing_iframe_block():
@@ -385,7 +402,12 @@ def _build_investing_iframe_block():
             ),
             html.Iframe(
                 srcDoc=INVESTING_EMBED_HTML,
-                style={"width": "100%", "height": "560px", "border": "1px solid #ddd", "backgroundColor": "white"},
+                style={
+                    "width": "100%",
+                    "height": "560px",
+                    "border": "1px solid #ddd",
+                    "backgroundColor": "white",
+                },
             ),
         ],
         style={"marginTop": "20px", "paddingTop": "8px"},
@@ -401,7 +423,6 @@ def get_layout():
             html.Div(
                 [
                     dcc.Store(id="macro-selected-series-codes", data=[]),
-
                     html.Div(
                         [
                             html.Div(
@@ -442,7 +463,7 @@ def get_layout():
                                         },
                                     ),
                                     html.Div(
-                                        "좌측 3열과 우측 요약열은 고정되고, 가운데 시계열만 좌우 스크롤됩니다.",
+                                        "좌측/우측 고정 영역은 스크롤되지 않고, 가운데 시계열만 좌우 스크롤됩니다.",
                                         style={"fontSize": "13px", "color": "#666", "marginBottom": "10px"},
                                     ),
                                     html.Div(
