@@ -4,10 +4,15 @@ Created on Wed Apr  8 18:13:41 2026
 
 @author: 박승욱
 """
-
-# services/macro_tracker_service.py
+# services/macro_tracker_service.py 
+# 수정본
 
 from copy import deepcopy
+
+import pandas as pd
+from sqlalchemy import text
+
+from db import engine
 
 
 # -------------------------
@@ -70,144 +75,124 @@ RULE_MAP = {
     },
 }
 
-
-# -------------------------
-# MOCK DATA
-# -------------------------
-MOCK_DB = {
-    "US": {
-        "policy_label": "연준 통화정책 국면",
-        "months": ["2401", "2402", "2405"],
-        "policy_rate_series": {
-            "2401": 5.25,
-            "2402": 5.50,
-            "2405": 5.25,
-        },
-        "indicators": [
-            {
-                "indicator": "NFP",
-                "category": "고용",
-                "release_date": "240607",
-                "asset_moves": {"stock": "-0.8%", "bond": "+6bp", "fx": "+0.4%"},
-                "actual": {"2401": "170k", "2402": "130k", "2405": "65k"},
-                "expected": {"2401": "160k", "2402": "120k", "2405": "70k"},
-                "previous": {"2401": "150k", "2402": "140k", "2405": "60k"},
-            },
-            {
-                "indicator": "실업률",
-                "category": "고용",
-                "release_date": "240607",
-                "asset_moves": {"stock": "-0.8%", "bond": "+6bp", "fx": "+0.4%"},
-                "actual": {"2401": "4.1%", "2402": "4.2%", "2405": "4.5%"},
-                "expected": {"2401": "4.0%", "2402": "4.1%", "2405": "4.4%"},
-                "previous": {"2401": "4.0%", "2402": "4.1%", "2405": "4.4%"},
-            },
-            {
-                "indicator": "참여율",
-                "category": "고용",
-                "release_date": "240607",
-                "asset_moves": {"stock": "-0.8%", "bond": "+6bp", "fx": "+0.4%"},
-                "actual": {"2401": "62.5%", "2402": "62.6%", "2405": "62.8%"},
-                "expected": {"2401": "62.4%", "2402": "62.5%", "2405": "62.7%"},
-                "previous": {"2401": "62.3%", "2402": "62.4%", "2405": "62.6%"},
-            },
-            {
-                "indicator": "소매판매",
-                "category": "소득과 지출",
-                "release_date": "240614",
-                "asset_moves": {"stock": "+0.4%", "bond": "-3bp", "fx": "-0.2%"},
-                "actual": {"2401": "0.8%", "2402": "0.6%", "2405": "0.2%"},
-                "expected": {"2401": "0.7%", "2402": "0.5%", "2405": "0.3%"},
-                "previous": {"2401": "0.6%", "2402": "0.5%", "2405": "0.1%"},
-            },
-            {
-                "indicator": "광공업생산",
-                "category": "산업",
-                "release_date": "240614",
-                "asset_moves": {"stock": "+0.2%", "bond": "-1bp", "fx": "-0.1%"},
-                "actual": {"2401": "1.3%", "2402": "1.0%", "2405": "0.4%"},
-                "expected": {"2401": "1.1%", "2402": "0.9%", "2405": "0.5%"},
-                "previous": {"2401": "1.0%", "2402": "0.8%", "2405": "0.3%"},
-            },
-            {
-                "indicator": "CPI",
-                "category": "물가",
-                "release_date": "240612",
-                "asset_moves": {"stock": "-1.0%", "bond": "+9bp", "fx": "+0.5%"},
-                "actual": {"2401": "3.1%", "2402": "3.3%", "2405": "3.5%"},
-                "expected": {"2401": "3.0%", "2402": "3.2%", "2405": "3.4%"},
-                "previous": {"2401": "2.9%", "2402": "3.1%", "2405": "3.4%"},
-            },
-            {
-                "indicator": "주택착공",
-                "category": "주택",
-                "release_date": "240618",
-                "asset_moves": {"stock": "+0.1%", "bond": "-2bp", "fx": "-0.1%"},
-                "actual": {"2401": "1.45", "2402": "1.41", "2405": "1.32"},
-                "expected": {"2401": "1.43", "2402": "1.40", "2405": "1.31"},
-                "previous": {"2401": "1.42", "2402": "1.39", "2405": "1.30"},
-            },
-        ],
-    },
-    "KR": {
-        "policy_label": "한국은행 통화정책 국면",
-        "months": ["2401", "2402", "2405"],
-        "policy_rate_series": {
-            "2401": 3.50,
-            "2402": 3.50,
-            "2405": 3.50,
-        },
-        "indicators": [
-            {
-                "indicator": "취업자수",
-                "category": "고용",
-                "release_date": "240612",
-                "asset_moves": {"stock": "+0.3%", "bond": "-2bp", "fx": "-0.2%"},
-                "actual": {"2401": "280", "2402": "300", "2405": "180"},
-                "expected": {"2401": "270", "2402": "290", "2405": "170"},
-                "previous": {"2401": "260", "2402": "280", "2405": "160"},
-            },
-            {
-                "indicator": "한국 실업률",
-                "category": "고용",
-                "release_date": "240612",
-                "asset_moves": {"stock": "+0.3%", "bond": "-2bp", "fx": "-0.2%"},
-                "actual": {"2401": "3.0%", "2402": "2.9%", "2405": "2.9%"},
-                "expected": {"2401": "3.1%", "2402": "2.9%", "2405": "2.8%"},
-                "previous": {"2401": "3.1%", "2402": "3.0%", "2405": "2.8%"},
-            },
-        ],
-    },
+DISPLAY_NAME_MAP = {
+    "비농업고용": "NFP",
+    "실업률": "실업률",
+    "경제활동참가율": "참여율",
+    "소매판매": "소매판매",
+    "산업생산": "광공업생산",
+    "CPI": "CPI",
+    "주택착공": "주택착공",
+    "취업자수": "취업자수",
+    "한국 실업률": "한국 실업률",
 }
 
 
 # -------------------------
 # 기본 유틸
 # -------------------------
+def clean_str(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def parse_display_value(value):
     if value is None:
         return None
 
-    text = str(value).strip()
+    text_value = str(value).strip()
 
-    if text == "":
+    if text_value == "":
         return None
 
-    text = text.replace(",", "")
+    text_value = text_value.replace(",", "")
 
-    if text.endswith("%p"):
-        return float(text[:-2])
+    if text_value.endswith("%p"):
+        return float(text_value[:-2])
 
-    if text.endswith("bp"):
-        return float(text[:-2])
+    if text_value.endswith("bp"):
+        return float(text_value[:-2])
 
-    if text.endswith("k"):
-        return float(text[:-1])
+    if text_value.endswith("k"):
+        return float(text_value[:-1])
 
-    if text.endswith("%"):
-        return float(text[:-1])
+    if text_value.endswith("%"):
+        return float(text_value[:-1])
 
-    return float(text)
+    return float(text_value)
+
+
+def normalize_frequency(value):
+    raw = clean_str(value).lower()
+
+    if raw in ("d", "day", "daily"):
+        return "daily"
+    if raw in ("w", "week", "weekly"):
+        return "weekly"
+    if raw in ("m", "month", "monthly"):
+        return "monthly"
+    if raw in ("q", "quarter", "quarterly"):
+        return "quarterly"
+    if raw in ("a", "y", "year", "annual", "yearly"):
+        return "yearly"
+
+    return raw
+
+
+def format_month_key(ts):
+    dt = pd.to_datetime(ts)
+    return dt.strftime("%y%m")
+
+
+def format_chart_date(ts):
+    dt = pd.to_datetime(ts)
+    return dt.strftime("%Y-%m-%d")
+
+
+def choose_display_name(meta_row):
+    name_ko = clean_str(meta_row.get("indicator_name_ko"))
+    series_name = clean_str(meta_row.get("series_name"))
+
+    if name_ko:
+        return DISPLAY_NAME_MAP.get(name_ko, name_ko)
+
+    return series_name
+
+
+def format_value_for_table(value, indicator, unit, frequency):
+    if value is None or pd.isna(value):
+        return ""
+
+    indicator = clean_str(indicator)
+    unit = clean_str(unit).lower()
+    frequency = normalize_frequency(frequency)
+
+    if indicator == "NFP":
+        return f"{value:,.0f}k"
+
+    if indicator in ("실업률", "참여율", "CPI", "한국 실업률"):
+        return f"{value:.1f}%"
+
+    if indicator == "주택착공":
+        return f"{value:.2f}"
+
+    if "%" in unit or "percent" in unit or "percentage" in unit:
+        return f"{value:.1f}%"
+
+    if "index" in unit:
+        return f"{value:.1f}"
+
+    if frequency == "monthly":
+        return f"{value:,.1f}"
+
+    if frequency == "weekly":
+        return f"{value:,.1f}"
+
+    if frequency == "daily":
+        return f"{value:,.2f}"
+
+    return f"{value:,.1f}"
 
 
 def _ordered_numeric_values(value_map, months):
@@ -325,37 +310,17 @@ def _calc_trend_from_series(values, speed_calc_type, trend_unit):
     return f"{count}{trend_unit}"
 
 
-def _compute_policy_phase_row(policy_rate_series, months):
-    phases = {}
-    ordered_rates = [policy_rate_series.get(month) for month in months]
-
-    for idx, month in enumerate(months):
-        current = ordered_rates[idx]
-
-        if idx == 0:
-            phases[month] = "유지"
-            continue
-
-        previous = ordered_rates[idx - 1]
-
-        if current == previous:
-            phases[month] = "유지"
-            continue
-
-        if current > previous:
-            phases[month] = "긴축"
-        else:
-            phases[month] = "완화"
-
-    return phases
-
-
 def _enrich_indicator(item, months):
     enriched = deepcopy(item)
 
     indicator = item["indicator"]
-    rule = RULE_MAP[indicator]
+    if indicator not in RULE_MAP:
+        enriched["change_display"] = ""
+        enriched["speed"] = ""
+        enriched["trend"] = ""
+        return enriched
 
+    rule = RULE_MAP[indicator]
     actual_values = _ordered_numeric_values(item["actual"], months)
 
     if len(actual_values) >= 2:
@@ -379,27 +344,180 @@ def _enrich_indicator(item, months):
 
 
 # -------------------------
+# DB 조회
+# -------------------------
+def load_macro_meta(country="US", category="ALL"):
+    where_parts = [
+        "is_macro_tracker = TRUE",
+        "is_active = TRUE",
+        "country_code = :country",
+    ]
+    params = {"country": country}
+
+    if category != "ALL":
+        where_parts.append("macro_category = :category")
+        params["category"] = category
+
+    query = text(f"""
+        SELECT
+            series_id,
+            series_code,
+            series_name,
+            country_code,
+            macro_category,
+            indicator_code,
+            indicator_name_ko,
+            indicator_name_en,
+            frequency,
+            unit,
+            display_order
+        FROM series_meta
+        WHERE {' AND '.join(where_parts)}
+        ORDER BY display_order, series_id
+    """)
+
+    df = pd.read_sql(query, engine, params=params)
+
+    if df.empty:
+        return df
+
+    df["frequency"] = df["frequency"].apply(normalize_frequency)
+    return df
+
+
+def load_macro_series_values(series_codes):
+    if not series_codes:
+        return pd.DataFrame(columns=["series_code", "date_value", "value_num"])
+
+    placeholders = ", ".join([f":code_{idx}" for idx in range(len(series_codes))])
+    params = {f"code_{idx}": code for idx, code in enumerate(series_codes)}
+
+    query = text(f"""
+        SELECT
+            m.series_code,
+            d.date_value,
+            d.value_num
+        FROM series_data d
+        JOIN series_meta m
+          ON d.series_id = m.series_id
+        WHERE m.series_code IN ({placeholders})
+        ORDER BY m.series_code, d.date_value
+    """)
+
+    df = pd.read_sql(query, engine, params=params)
+
+    if df.empty:
+        return df
+
+    df["date_value"] = pd.to_datetime(df["date_value"])
+    df["value_num"] = pd.to_numeric(df["value_num"], errors="coerce")
+    df = df.dropna(subset=["value_num"]).sort_values(["series_code", "date_value"])
+
+    return df
+
+
+def build_indicator_item(meta_row, full_months, series_df):
+    display_name = choose_display_name(meta_row)
+    frequency = meta_row.get("frequency")
+    unit = meta_row.get("unit")
+
+    actual_map = {month: "" for month in full_months}
+    series_rows = []
+
+    if not series_df.empty:
+        for _, row in series_df.iterrows():
+            month_key = format_month_key(row["date_value"])
+            value_num = float(row["value_num"])
+
+            actual_map[month_key] = format_value_for_table(
+                value=value_num,
+                indicator=display_name,
+                unit=unit,
+                frequency=frequency,
+            )
+
+            series_rows.append(
+                {
+                    "date": format_chart_date(row["date_value"]),
+                    "value": value_num,
+                }
+            )
+
+        release_date = format_chart_date(series_df["date_value"].max())
+    else:
+        release_date = ""
+
+    item = {
+        "indicator": display_name,
+        "category": clean_str(meta_row.get("macro_category")),
+        "release_date": release_date,
+        "asset_moves": {"stock": "", "bond": "", "fx": ""},
+        "actual": actual_map,
+        "expected": {},
+        "previous": {},
+        "series": series_rows,
+        "frequency": frequency,
+        "unit": unit,
+        "series_code": clean_str(meta_row.get("series_code")),
+    }
+
+    return _enrich_indicator(item, full_months)
+
+
+# -------------------------
 # 외부 제공 함수
 # -------------------------
 def get_macro_tracker_payload(country="US", category="ALL"):
-    base = MOCK_DB[country]
-    months = base["months"]
+    meta_df = load_macro_meta(country=country, category=category)
 
-    if category == "ALL":
-        filtered = base["indicators"]
-    else:
-        filtered = [item for item in base["indicators"] if item["category"] == category]
+    if meta_df.empty:
+        return {
+            "country": country,
+            "months": [],
+            "policy_row": {
+                "label": "통화정책 국면",
+                "values": {},
+            },
+            "indicators": [],
+        }
 
-    enriched_indicators = [_enrich_indicator(item, months) for item in filtered]
+    series_codes = meta_df["series_code"].dropna().astype(str).tolist()
+    data_df = load_macro_series_values(series_codes)
 
-    policy_values = _compute_policy_phase_row(base["policy_rate_series"], months)
+    if data_df.empty:
+        return {
+            "country": country,
+            "months": [],
+            "policy_row": {
+                "label": "통화정책 국면",
+                "values": {},
+            },
+            "indicators": [],
+        }
+
+    full_months = (
+        data_df["date_value"]
+        .drop_duplicates()
+        .sort_values()
+        .apply(format_month_key)
+        .tolist()
+    )
+
+    indicators = []
+    for _, meta_row in meta_df.iterrows():
+        series_code = clean_str(meta_row["series_code"])
+        series_df = data_df[data_df["series_code"] == series_code].copy()
+        item = build_indicator_item(meta_row, full_months, series_df)
+        indicators.append(item)
+
+    policy_label = "연준 통화정책 국면" if country == "US" else "통화정책 국면"
 
     return {
         "country": country,
-        "months": months,
+        "months": full_months,
         "policy_row": {
-            "label": base["policy_label"],
-            "values": policy_values,
+            "label": policy_label,
+            "values": {month: "" for month in full_months},
         },
-        "indicators": enriched_indicators,
+        "indicators": indicators,
     }
