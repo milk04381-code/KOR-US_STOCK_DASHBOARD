@@ -20,55 +20,46 @@ from db import engine
 # -------------------------
 RULE_MAP = {
     "NFP": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pct_change",
         "speed_calc_type": "pct_change",
     },
     "실업률": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pp_diff",
         "speed_calc_type": "pp_diff",
     },
     "참여율": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pp_diff",
         "speed_calc_type": "pp_diff",
     },
     "소매판매": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pct_change",
         "speed_calc_type": "pct_change",
     },
     "광공업생산": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pct_change",
         "speed_calc_type": "pct_change",
     },
     "CPI": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pp_diff",
         "speed_calc_type": "pp_diff",
     },
     "주택착공": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pct_change",
         "speed_calc_type": "pct_change",
     },
     "취업자수": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "diff",
         "speed_calc_type": "diff",
     },
     "한국 실업률": {
-        "freq_type": "M",
         "trend_unit": "개월",
         "change_calc_type": "pp_diff",
         "speed_calc_type": "pp_diff",
@@ -79,12 +70,30 @@ DISPLAY_NAME_MAP = {
     "비농업고용": "NFP",
     "실업률": "실업률",
     "경제활동참가율": "참여율",
+    "광의실업률(U6)": "광의실업률(U6)",
+    "신규 실업수당청구건수": "신규 실업수당청구건수",
+    "개인소득": "개인소득",
+    "개인소비지출": "개인소비지출",
     "소매판매": "소매판매",
     "산업생산": "광공업생산",
+    "설비가동률": "설비가동률",
+    "내구재주문": "내구재주문",
+    "핵심 자본재 수주": "핵심 자본재 수주",
     "CPI": "CPI",
+    "PPI": "PPI",
+    "PCE 물가지수": "PCE 물가지수",
+    "10년 기대인플레이션": "10년 기대인플레이션",
     "주택착공": "주택착공",
     "취업자수": "취업자수",
     "한국 실업률": "한국 실업률",
+}
+
+FREQUENCY_LABEL_MAP = {
+    "monthly": "월간",
+    "weekly": "주간",
+    "daily": "일간",
+    "quarterly": "분기",
+    "yearly": "연간",
 }
 
 
@@ -140,16 +149,6 @@ def normalize_frequency(value):
     return raw
 
 
-def format_month_key(ts):
-    dt = pd.to_datetime(ts)
-    return dt.strftime("%y%m")
-
-
-def format_chart_date(ts):
-    dt = pd.to_datetime(ts)
-    return dt.strftime("%Y-%m-%d")
-
-
 def choose_display_name(meta_row):
     name_ko = clean_str(meta_row.get("indicator_name_ko"))
     series_name = clean_str(meta_row.get("series_name"))
@@ -158,6 +157,29 @@ def choose_display_name(meta_row):
         return DISPLAY_NAME_MAP.get(name_ko, name_ko)
 
     return series_name
+
+
+def format_period_key(ts, frequency):
+    dt = pd.to_datetime(ts)
+    freq = normalize_frequency(frequency)
+
+    if freq == "monthly":
+        return dt.strftime("%y%m")
+    if freq == "weekly":
+        return dt.strftime("%y%m%d")
+    if freq == "daily":
+        return dt.strftime("%y%m%d")
+    if freq == "quarterly":
+        quarter = ((dt.month - 1) // 3) + 1
+        return f"{dt.strftime('%y')}Q{quarter}"
+    if freq == "yearly":
+        return dt.strftime("%Y")
+
+    return dt.strftime("%Y-%m-%d")
+
+
+def format_chart_date(ts):
+    return pd.to_datetime(ts).strftime("%Y-%m-%d")
 
 
 def format_value_for_table(value, indicator, unit, frequency):
@@ -171,7 +193,7 @@ def format_value_for_table(value, indicator, unit, frequency):
     if indicator == "NFP":
         return f"{value:,.0f}k"
 
-    if indicator in ("실업률", "참여율", "CPI", "한국 실업률"):
+    if indicator in ("실업률", "참여율", "CPI", "한국 실업률", "광의실업률(U6)", "설비가동률", "10년 기대인플레이션"):
         return f"{value:.1f}%"
 
     if indicator == "주택착공":
@@ -183,10 +205,7 @@ def format_value_for_table(value, indicator, unit, frequency):
     if "index" in unit:
         return f"{value:.1f}"
 
-    if frequency == "monthly":
-        return f"{value:,.1f}"
-
-    if frequency == "weekly":
+    if "persons" in unit or "number" in unit:
         return f"{value:,.1f}"
 
     if frequency == "daily":
@@ -195,11 +214,11 @@ def format_value_for_table(value, indicator, unit, frequency):
     return f"{value:,.1f}"
 
 
-def _ordered_numeric_values(value_map, months):
+def _ordered_numeric_values(value_map, period_keys):
     values = []
 
-    for month in months:
-        value = value_map.get(month, "")
+    for key in period_keys:
+        value = value_map.get(key, "")
         numeric = parse_display_value(value)
         if numeric is not None:
             values.append(numeric)
@@ -310,18 +329,19 @@ def _calc_trend_from_series(values, speed_calc_type, trend_unit):
     return f"{count}{trend_unit}"
 
 
-def _enrich_indicator(item, months):
+def _enrich_indicator(item, period_keys):
     enriched = deepcopy(item)
 
     indicator = item["indicator"]
-    if indicator not in RULE_MAP:
+    rule = RULE_MAP.get(indicator)
+
+    if rule is None:
         enriched["change_display"] = ""
         enriched["speed"] = ""
         enriched["trend"] = ""
         return enriched
 
-    rule = RULE_MAP[indicator]
-    actual_values = _ordered_numeric_values(item["actual"], months)
+    actual_values = _ordered_numeric_values(item["actual"], period_keys)
 
     if len(actual_values) >= 2:
         change_value = _calc_change_value(
@@ -416,20 +436,22 @@ def load_macro_series_values(series_codes):
     return df
 
 
-def build_indicator_item(meta_row, full_months, series_df):
+def build_indicator_item(meta_row, section_keys, series_df):
     display_name = choose_display_name(meta_row)
-    frequency = meta_row.get("frequency")
-    unit = meta_row.get("unit")
+    frequency = normalize_frequency(meta_row.get("frequency"))
+    unit = clean_str(meta_row.get("unit"))
+    series_code = clean_str(meta_row.get("series_code"))
 
-    actual_map = {month: "" for month in full_months}
+    actual_map = {key: "" for key in section_keys}
     series_rows = []
 
     if not series_df.empty:
         for _, row in series_df.iterrows():
-            month_key = format_month_key(row["date_value"])
+            key = format_period_key(row["date_value"], frequency)
             value_num = float(row["value_num"])
 
-            actual_map[month_key] = format_value_for_table(
+            # 같은 key가 여러 번 생기면 가장 마지막 값으로 덮어씀
+            actual_map[key] = format_value_for_table(
                 value=value_num,
                 indicator=display_name,
                 unit=unit,
@@ -448,20 +470,54 @@ def build_indicator_item(meta_row, full_months, series_df):
         release_date = ""
 
     item = {
+        "series_code": series_code,
         "indicator": display_name,
         "category": clean_str(meta_row.get("macro_category")),
         "release_date": release_date,
         "asset_moves": {"stock": "", "bond": "", "fx": ""},
         "actual": actual_map,
-        "expected": {},
-        "previous": {},
         "series": series_rows,
         "frequency": frequency,
         "unit": unit,
-        "series_code": clean_str(meta_row.get("series_code")),
     }
 
-    return _enrich_indicator(item, full_months)
+    return _enrich_indicator(item, section_keys)
+
+
+def build_section_payload(meta_df, data_df, frequency):
+    section_meta = meta_df[meta_df["frequency"] == frequency].copy()
+
+    if section_meta.empty:
+        return None
+
+    section_codes = section_meta["series_code"].dropna().astype(str).tolist()
+    section_data = data_df[data_df["series_code"].isin(section_codes)].copy()
+
+    if section_data.empty:
+        period_keys = []
+    else:
+        period_keys = (
+            section_data["date_value"]
+            .drop_duplicates()
+            .sort_values()
+            .apply(lambda x: format_period_key(x, frequency))
+            .drop_duplicates()
+            .tolist()
+        )
+
+    indicators = []
+    for _, meta_row in section_meta.iterrows():
+        series_code = clean_str(meta_row["series_code"])
+        series_df = section_data[section_data["series_code"] == series_code].copy()
+        item = build_indicator_item(meta_row, period_keys, series_df)
+        indicators.append(item)
+
+    return {
+        "frequency": frequency,
+        "frequency_label": FREQUENCY_LABEL_MAP.get(frequency, frequency),
+        "period_keys": period_keys,
+        "indicators": indicators,
+    }
 
 
 # -------------------------
@@ -473,12 +529,7 @@ def get_macro_tracker_payload(country="US", category="ALL"):
     if meta_df.empty:
         return {
             "country": country,
-            "months": [],
-            "policy_row": {
-                "label": "통화정책 국면",
-                "values": {},
-            },
-            "indicators": [],
+            "sections": [],
         }
 
     series_codes = meta_df["series_code"].dropna().astype(str).tolist()
@@ -487,37 +538,18 @@ def get_macro_tracker_payload(country="US", category="ALL"):
     if data_df.empty:
         return {
             "country": country,
-            "months": [],
-            "policy_row": {
-                "label": "통화정책 국면",
-                "values": {},
-            },
-            "indicators": [],
+            "sections": [],
         }
 
-    full_months = (
-        data_df["date_value"]
-        .drop_duplicates()
-        .sort_values()
-        .apply(format_month_key)
-        .tolist()
-    )
+    ordered_frequencies = ["monthly", "weekly", "daily", "quarterly", "yearly"]
+    sections = []
 
-    indicators = []
-    for _, meta_row in meta_df.iterrows():
-        series_code = clean_str(meta_row["series_code"])
-        series_df = data_df[data_df["series_code"] == series_code].copy()
-        item = build_indicator_item(meta_row, full_months, series_df)
-        indicators.append(item)
-
-    policy_label = "연준 통화정책 국면" if country == "US" else "통화정책 국면"
+    for frequency in ordered_frequencies:
+        section = build_section_payload(meta_df, data_df, frequency)
+        if section is not None and section["indicators"]:
+            sections.append(section)
 
     return {
         "country": country,
-        "months": full_months,
-        "policy_row": {
-            "label": policy_label,
-            "values": {month: "" for month in full_months},
-        },
-        "indicators": indicators,
+        "sections": sections,
     }

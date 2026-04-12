@@ -11,15 +11,14 @@ Created on Wed Apr  8 13:27:30 2026
 # 1. 상단 2열 + 하단 1행 레이아웃 유지
 # 2. 좌상단: DB 기반 전체 시계열 표
 # 3. 우상단: 선택 지표 전체 시계열 차트
-# 4. 표는 좌측 고정 열 + 내부 가로/세로 스크롤
+# 4. 표는 좌우측 고정 열 + 내부 가로/세로 스크롤
 # 5. 표 가시폭은 좌측 패널 안으로 제한하여 우측 차트 유지
+
 
 from dash import dcc, html, Input, Output, ALL
 import plotly.graph_objs as go
 
-from services.macro_tracker_service import (
-    get_macro_tracker_payload,
-)
+from services.macro_tracker_service import get_macro_tracker_payload
 
 COUNTRY_OPTIONS = [
     {"label": "미국", "value": "US"},
@@ -86,285 +85,257 @@ INVESTING_EMBED_HTML = """
 </html>
 """
 
-
 # -------------------------
-# 스타일 상수
+# 폭 / sticky 상수
 # -------------------------
-STICKY_BORDER = "1px solid #333"
-MONTH_COL_WIDTH = 92
+W_SELECT = 56
+W_NAME = 190
+W_KIND = 90
+W_TIME = 92
+W_CHANGE = 96
+W_SPEED = 72
+W_TREND = 72
+W_RELEASE = 100
+W_ASSET = 96
 
-STICKY_LEFT_1 = {
-    "position": "sticky",
-    "left": "0px",
-    "zIndex": 5,
-    "backgroundColor": "white",
-}
-STICKY_LEFT_2 = {
-    "position": "sticky",
-    "left": "56px",
-    "zIndex": 5,
-    "backgroundColor": "white",
-}
-STICKY_LEFT_3 = {
-    "position": "sticky",
-    "left": "216px",
-    "zIndex": 5,
-    "backgroundColor": "white",
-}
+BORDER = "1px solid #333"
 
-STICKY_HEAD_1 = {
-    "position": "sticky",
-    "top": "0px",
-    "zIndex": 7,
-}
-STICKY_HEAD_2 = {
-    "position": "sticky",
-    "top": "34px",
-    "zIndex": 7,
-}
+
+def px(value):
+    return f"{value}px"
+
+
+RIGHT_FX = 0
+RIGHT_BOND = W_ASSET
+RIGHT_STOCK = W_ASSET * 2
+RIGHT_RELEASE = W_ASSET * 3
+RIGHT_TREND = W_ASSET * 3 + W_RELEASE
+RIGHT_SPEED = W_ASSET * 3 + W_RELEASE + W_TREND
+RIGHT_CHANGE = W_ASSET * 3 + W_RELEASE + W_TREND + W_SPEED
 
 
 # -------------------------
-# 테이블 유틸
+# 공통 셀 스타일
 # -------------------------
-def _checkbox_cell(indicator, selected_indicators):
-    checked = [indicator] if indicator in selected_indicators else []
-
-    return html.Td(
-        dcc.Checklist(
-            id={"type": "macro-checklist", "index": indicator},
-            options=[{"label": "", "value": indicator}],
-            value=checked,
-            style={"display": "flex", "justifyContent": "center"},
-            inputStyle={"marginRight": "0px"},
-        ),
-        style={
-            "textAlign": "center",
-            "border": STICKY_BORDER,
-            "padding": "6px 8px",
-            "verticalAlign": "middle",
-            "width": "56px",
-            "minWidth": "56px",
-            **STICKY_LEFT_1,
-        },
-    )
-
-
-def _td(
-    text,
-    row_span=1,
-    col_span=1,
-    align="center",
-    bg=None,
-    bold=False,
-    width=None,
-    min_width=None,
-    sticky_style=None,
-):
-    style = {
-        "border": STICKY_BORDER,
-        "padding": "6px 8px",
-        "textAlign": align,
-        "verticalAlign": "middle",
-        "whiteSpace": "nowrap",
-        "fontSize": "13px",
-        "backgroundColor": bg or "white",
-    }
-
-    if bold:
-        style["fontWeight"] = "bold"
-
-    if width is not None:
-        style["width"] = width
-
-    if min_width is not None:
-        style["minWidth"] = min_width
-
-    if sticky_style:
-        style.update(sticky_style)
-
-    return html.Td(text, rowSpan=row_span, colSpan=col_span, style=style)
-
-
-def _th(
-    text,
-    row_span=1,
-    col_span=1,
-    align="center",
-    bg="#f2f2f2",
-    width=None,
-    min_width=None,
-    sticky_style=None,
-):
-    style = {
-        "border": STICKY_BORDER,
+def _base_cell_style(bg="white", align="center"):
+    return {
+        "border": BORDER,
         "padding": "6px 8px",
         "textAlign": align,
         "verticalAlign": "middle",
         "whiteSpace": "nowrap",
         "fontSize": "13px",
         "backgroundColor": bg,
-        "fontWeight": "normal",
+        "boxSizing": "border-box",
     }
 
-    if width is not None:
-        style["width"] = width
 
-    if min_width is not None:
-        style["minWidth"] = min_width
+def _sticky_left(style, left):
+    result = dict(style)
+    result.update({
+        "position": "sticky",
+        "left": px(left),
+        "zIndex": 6,
+        "backgroundColor": style.get("backgroundColor", "white"),
+    })
+    return result
 
-    if sticky_style:
-        style.update(sticky_style)
 
-    return html.Th(text, rowSpan=row_span, colSpan=col_span, style=style)
+def _sticky_right(style, right):
+    result = dict(style)
+    result.update({
+        "position": "sticky",
+        "right": px(right),
+        "zIndex": 6,
+        "backgroundColor": style.get("backgroundColor", "white"),
+    })
+    return result
 
 
-def _month_td(text):
-    return _td(
-        text,
-        width=f"{MONTH_COL_WIDTH}px",
-        min_width=f"{MONTH_COL_WIDTH}px",
+def _sticky_top(style, top=0, z=7):
+    result = dict(style)
+    result.update({
+        "position": "sticky",
+        "top": px(top),
+        "zIndex": z,
+        "backgroundColor": style.get("backgroundColor", "#f2f2f2"),
+    })
+    return result
+
+
+def _th(text, width, align="center", sticky_left=None, sticky_right=None):
+    style = _base_cell_style(bg="#f2f2f2", align=align)
+    style["width"] = px(width)
+    style["minWidth"] = px(width)
+    style = _sticky_top(style, top=0, z=8)
+
+    if sticky_left is not None:
+        style = _sticky_left(style, sticky_left)
+        style["zIndex"] = 9
+
+    if sticky_right is not None:
+        style = _sticky_right(style, sticky_right)
+        style["zIndex"] = 9
+
+    return html.Th(text, style=style)
+
+
+def _td(text, width, align="center", bold=False, sticky_left=None, sticky_right=None):
+    style = _base_cell_style(bg="white", align=align)
+    style["width"] = px(width)
+    style["minWidth"] = px(width)
+
+    if bold:
+        style["fontWeight"] = "bold"
+
+    if sticky_left is not None:
+        style = _sticky_left(style, sticky_left)
+
+    if sticky_right is not None:
+        style = _sticky_right(style, sticky_right)
+
+    return html.Td(text, style=style)
+
+
+def _checkbox_cell(series_code, selected_series_codes):
+    checked = [series_code] if series_code in selected_series_codes else []
+
+    return html.Td(
+        dcc.Checklist(
+            id={"type": "macro-checklist", "index": series_code},
+            options=[{"label": "", "value": series_code}],
+            value=checked,
+            style={"display": "flex", "justifyContent": "center"},
+            inputStyle={"marginRight": "0px"},
+        ),
+        style=_sticky_left(
+            {
+                **_base_cell_style(bg="white", align="center"),
+                "width": px(W_SELECT),
+                "minWidth": px(W_SELECT),
+            },
+            0,
+        ),
     )
 
 
-def _month_th(text, sticky_top=None):
-    sticky = {}
-    if sticky_top:
-        sticky.update(sticky_top)
-
-    return _th(
-        text,
-        width=f"{MONTH_COL_WIDTH}px",
-        min_width=f"{MONTH_COL_WIDTH}px",
-        sticky_style=sticky,
-    )
-
-
-def _build_indicator_row(item, months, selected_indicators):
+# -------------------------
+# 테이블 구성
+# -------------------------
+def _build_indicator_row(item, period_keys, selected_series_codes):
     actual_map = item["actual"]
 
-    return html.Tr(
+    cells = [
+        _checkbox_cell(item["series_code"], selected_series_codes),
+        _td(item["indicator"], W_NAME, align="left", bold=True, sticky_left=W_SELECT),
+        _td("실제", W_KIND, align="left", sticky_left=W_SELECT + W_NAME),
+    ]
+
+    for period_key in period_keys:
+        cells.append(_td(actual_map.get(period_key, ""), W_TIME))
+
+    cells.extend(
         [
-            _checkbox_cell(item["indicator"], selected_indicators),
-            _td(
-                item["indicator"],
-                align="left",
-                bold=True,
-                width="160px",
-                min_width="160px",
-                sticky_style=STICKY_LEFT_2,
-            ),
-            _td(
-                "실제",
-                align="left",
-                width="92px",
-                min_width="92px",
-                sticky_style=STICKY_LEFT_3,
-            ),
-            *[_month_td(actual_map.get(month, "")) for month in months],
-            _td(item.get("change_display", ""), width="92px", min_width="92px"),
-            _td(item.get("speed", ""), width="74px", min_width="74px"),
-            _td(item.get("trend", ""), width="74px", min_width="74px"),
-            _td(item.get("release_date", ""), width="100px", min_width="100px"),
-            _td(item.get("asset_moves", {}).get("stock", ""), align="right", width="96px", min_width="96px"),
-            _td(item.get("asset_moves", {}).get("bond", ""), align="right", width="96px", min_width="96px"),
-            _td(item.get("asset_moves", {}).get("fx", ""), align="right", width="96px", min_width="96px"),
+            _td(item.get("change_display", ""), W_CHANGE, sticky_right=RIGHT_CHANGE),
+            _td(item.get("speed", ""), W_SPEED, sticky_right=RIGHT_SPEED),
+            _td(item.get("trend", ""), W_TREND, sticky_right=RIGHT_TREND),
+            _td(item.get("release_date", ""), W_RELEASE, sticky_right=RIGHT_RELEASE),
+            _td(item.get("asset_moves", {}).get("stock", ""), W_ASSET, align="right", sticky_right=RIGHT_STOCK),
+            _td(item.get("asset_moves", {}).get("bond", ""), W_ASSET, align="right", sticky_right=RIGHT_BOND),
+            _td(item.get("asset_moves", {}).get("fx", ""), W_ASSET, align="right", sticky_right=RIGHT_FX),
         ]
     )
 
+    return html.Tr(cells)
 
-def _build_table(payload, selected_indicators):
-    months = payload["months"]
-    indicators = payload["indicators"]
-    policy_label = payload["policy_row"]["label"]
-    policy_values = payload["policy_row"]["values"]
+
+def _build_one_frequency_table(section, selected_series_codes):
+    period_keys = section["period_keys"]
+    indicators = section["indicators"]
 
     if not indicators:
         return html.Div(
             "조건에 맞는 지표가 없습니다.",
-            style={
-                "padding": "20px",
-                "fontSize": "14px",
-                "color": "#666",
-            },
+            style={"padding": "12px", "fontSize": "14px", "color": "#666"},
         )
 
     body_rows = []
     for item in indicators:
-        body_rows.append(_build_indicator_row(item, months, selected_indicators))
+        body_rows.append(_build_indicator_row(item, period_keys, selected_series_codes))
 
-    min_table_width = (
-        56 + 160 + 92 + (len(months) * MONTH_COL_WIDTH) + 92 + 74 + 74 + 100 + 96 + 96 + 96
+    table_min_width = (
+        W_SELECT + W_NAME + W_KIND +
+        len(period_keys) * W_TIME +
+        W_CHANGE + W_SPEED + W_TREND + W_RELEASE + W_ASSET + W_ASSET + W_ASSET
     )
 
-    return html.Table(
+    table = html.Table(
         [
             html.Thead(
-                [
-                    html.Tr(
-                        [
-                            _th(
-                                "선택",
-                                row_span=2,
-                                width="56px",
-                                min_width="56px",
-                                sticky_style={**STICKY_LEFT_1, **STICKY_HEAD_1},
-                            ),
-                            _th(
-                                "지표명",
-                                row_span=2,
-                                width="160px",
-                                min_width="160px",
-                                sticky_style={**STICKY_LEFT_2, **STICKY_HEAD_1},
-                            ),
-                            _th(
-                                policy_label,
-                                align="left",
-                                width="92px",
-                                min_width="92px",
-                                sticky_style={**STICKY_LEFT_3, **STICKY_HEAD_1},
-                            ),
-                            *[
-                                _month_th(policy_values.get(month, ""), sticky_top=STICKY_HEAD_1)
-                                for month in months
-                            ],
-                            _th("전기 대비 변동", row_span=2, width="92px", min_width="92px", sticky_style=STICKY_HEAD_1),
-                            _th("속도", row_span=2, width="74px", min_width="74px", sticky_style=STICKY_HEAD_1),
-                            _th("추세", row_span=2, width="74px", min_width="74px", sticky_style=STICKY_HEAD_1),
-                            _th("발표일", row_span=2, width="100px", min_width="100px", sticky_style=STICKY_HEAD_1),
-                            _th("자산군별 일중 변동", col_span=3, sticky_style=STICKY_HEAD_1),
-                        ]
-                    ),
-                    html.Tr(
-                        [
-                            _th(
-                                "기준시기",
-                                align="left",
-                                width="92px",
-                                min_width="92px",
-                                sticky_style={**STICKY_LEFT_3, **STICKY_HEAD_2},
-                            ),
-                            *[
-                                _month_th(month, sticky_top=STICKY_HEAD_2)
-                                for month in months
-                            ],
-                            _th("주식 | S&P 500", width="96px", min_width="96px", sticky_style=STICKY_HEAD_2),
-                            _th("채권 | 미국 2년물 국채 금리", width="96px", min_width="96px", sticky_style=STICKY_HEAD_2),
-                            _th("외환 | 달러 인덱스", width="96px", min_width="96px", sticky_style=STICKY_HEAD_2),
-                        ]
-                    ),
-                ]
+                html.Tr(
+                    [
+                        _th("선택", W_SELECT, sticky_left=0),
+                        _th("지표명", W_NAME, align="left", sticky_left=W_SELECT),
+                        _th("구분", W_KIND, align="left", sticky_left=W_SELECT + W_NAME),
+                        *[_th(period_key, W_TIME) for period_key in period_keys],
+                        _th("전기 대비 변동", W_CHANGE, sticky_right=RIGHT_CHANGE),
+                        _th("속도", W_SPEED, sticky_right=RIGHT_SPEED),
+                        _th("추세", W_TREND, sticky_right=RIGHT_TREND),
+                        _th("발표일", W_RELEASE, sticky_right=RIGHT_RELEASE),
+                        _th("주식", W_ASSET, sticky_right=RIGHT_STOCK),
+                        _th("채권", W_ASSET, sticky_right=RIGHT_BOND),
+                        _th("외환", W_ASSET, sticky_right=RIGHT_FX),
+                    ]
+                )
             ),
             html.Tbody(body_rows),
         ],
         style={
             "width": "100%",
+            "minWidth": px(table_min_width),
             "borderCollapse": "separate",
             "borderSpacing": "0",
-            "minWidth": f"{min_table_width}px",
             "backgroundColor": "white",
         },
     )
+
+    return html.Div(
+        [
+            html.H4(
+                f"{section['frequency_label']} 지표",
+                style={"marginTop": "0", "marginBottom": "10px"},
+            ),
+            html.Div(
+                table,
+                style={
+                    "width": "100%",
+                    "maxWidth": "100%",
+                    "overflowX": "auto",
+                    "overflowY": "auto",
+                    "maxHeight": "420px",
+                    "border": "1px solid #ddd",
+                    "backgroundColor": "white",
+                },
+            ),
+        ],
+        style={"marginBottom": "18px"},
+    )
+
+
+def _build_tables(payload, selected_series_codes):
+    sections = payload.get("sections", [])
+
+    if not sections:
+        return html.Div(
+            "조건에 맞는 시계열이 없습니다.",
+            style={"padding": "20px", "fontSize": "14px", "color": "#666"},
+        )
+
+    blocks = []
+    for section in sections:
+        blocks.append(_build_one_frequency_table(section, selected_series_codes))
+
+    return html.Div(blocks)
 
 
 def _build_investing_iframe_block():
@@ -407,7 +378,7 @@ def get_layout():
         children=[
             html.Div(
                 [
-                    dcc.Store(id="macro-selected-indicators", data=[]),
+                    dcc.Store(id="macro-selected-series-codes", data=[]),
 
                     html.Div(
                         [
@@ -451,7 +422,8 @@ def get_layout():
                                     ),
 
                                     html.Div(
-                                        "좌측 고정 열(선택/지표명/구분)을 제외한 전체 시계열 값은 표 내부에서 좌우 스크롤로 확인합니다.",
+                                        "좌측 3열과 우측 요약열은 고정됩니다. 가운데 시계열 부분만 좌우 스크롤로 확인합니다. "
+                                        "또한 주기(monthly / weekly / daily)가 다른 데이터는 표를 분리해 표시합니다.",
                                         style={
                                             "fontSize": "13px",
                                             "color": "#666",
@@ -461,16 +433,7 @@ def get_layout():
 
                                     html.Div(
                                         id="macro-table-container",
-                                        children=_build_table(initial_payload, selected_indicators=[]),
-                                        style={
-                                            "width": "100%",
-                                            "maxWidth": "100%",
-                                            "overflowX": "auto",
-                                            "overflowY": "auto",
-                                            "maxHeight": "720px",
-                                            "border": "1px solid #ddd",
-                                            "backgroundColor": "white",
-                                        },
+                                        children=_build_tables(initial_payload, selected_series_codes=[]),
                                     ),
                                 ],
                                 style={
@@ -495,7 +458,7 @@ def get_layout():
                                     ),
                                     dcc.Graph(
                                         id="macro-main-chart",
-                                        style={"height": "720px"},
+                                        style={"height": "760px"},
                                     ),
                                 ],
                                 style={
@@ -528,23 +491,27 @@ def register_callbacks(app):
         Output("macro-table-container", "children"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
-        Input("macro-selected-indicators", "data"),
+        Input("macro-selected-series-codes", "data"),
     )
-    def render_macro_table(country, category, selected_indicators):
+    def render_macro_table(country, category, selected_series_codes):
         payload = get_macro_tracker_payload(country=country, category=category)
-        selected_indicators = selected_indicators or []
+        selected_series_codes = selected_series_codes or []
 
-        valid_indicators = {item["indicator"] for item in payload["indicators"]}
-        filtered_selected = [x for x in selected_indicators if x in valid_indicators]
+        valid_codes = set()
+        for section in payload.get("sections", []):
+            for item in section.get("indicators", []):
+                valid_codes.add(item["series_code"])
 
-        return _build_table(payload, selected_indicators=filtered_selected)
+        filtered_selected = [x for x in selected_series_codes if x in valid_codes]
+
+        return _build_tables(payload, selected_series_codes=filtered_selected)
 
     @app.callback(
-        Output("macro-selected-indicators", "data"),
+        Output("macro-selected-series-codes", "data"),
         Input({"type": "macro-checklist", "index": ALL}, "value"),
         Input({"type": "macro-checklist", "index": ALL}, "id"),
     )
-    def update_selected_indicators(check_values, check_ids):
+    def update_selected_series_codes(check_values, check_ids):
         selected = []
 
         for values, comp_id in zip(check_values, check_ids):
@@ -555,17 +522,21 @@ def register_callbacks(app):
 
     @app.callback(
         Output("macro-main-chart", "figure"),
-        Input("macro-selected-indicators", "data"),
+        Input("macro-selected-series-codes", "data"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
     )
-    def update_macro_chart(selected_indicators, country, category):
+    def update_macro_chart(selected_series_codes, country, category):
         fig = go.Figure()
         payload = get_macro_tracker_payload(country=country, category=category)
-        selected_indicators = selected_indicators or []
+        selected_series_codes = selected_series_codes or []
 
-        indicator_map = {item["indicator"]: item for item in payload["indicators"]}
-        selected_visible = [x for x in selected_indicators if x in indicator_map]
+        item_map = {}
+        for section in payload.get("sections", []):
+            for item in section.get("indicators", []):
+                item_map[item["series_code"]] = item
+
+        selected_visible = [x for x in selected_series_codes if x in item_map]
 
         if not selected_visible:
             fig.update_layout(
@@ -575,19 +546,19 @@ def register_callbacks(app):
             )
             return fig
 
-        for indicator in selected_visible:
-            item = indicator_map[indicator]
+        for series_code in selected_visible:
+            item = item_map[series_code]
             series = item.get("series", [])
 
-            x_values = [row["date"] for row in series]
-            y_values = [row["value"] for row in series]
+            if not series:
+                continue
 
             fig.add_trace(
                 go.Scatter(
-                    x=x_values,
-                    y=y_values,
+                    x=[row["date"] for row in series],
+                    y=[row["value"] for row in series],
                     mode="lines+markers",
-                    name=indicator,
+                    name=item["indicator"],
                 )
             )
 
