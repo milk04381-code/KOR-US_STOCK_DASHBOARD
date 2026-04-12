@@ -14,7 +14,6 @@ Created on Wed Apr  8 13:27:30 2026
 # 4. 표는 좌우측 고정 열 + 내부 가로/세로 스크롤
 # 5. 표 가시폭은 좌측 패널 안으로 제한하여 우측 차트 유지
 
-
 from dash import dcc, html, Input, Output, ALL
 import plotly.graph_objs as go
 
@@ -77,7 +76,6 @@ W_SELECT = 44
 W_NAME = 120
 W_POLICY = 88
 
-W_TIME_LABEL = 72
 W_TIME = 72
 
 W_CHANGE = 78
@@ -163,7 +161,9 @@ def _checkbox_control(series_code, selected_series_codes):
 # 좌/중/우 패널 빌더
 # -------------------------
 def _build_left_table(indicators, selected_series_codes):
-    header = html.Table(
+    total_width = W_SELECT + W_NAME + W_POLICY
+
+    table = html.Table(
         [
             html.Thead(
                 [
@@ -171,12 +171,12 @@ def _build_left_table(indicators, selected_series_codes):
                         [
                             html.Th("선택", rowSpan=2, style=_head_style(W_SELECT)),
                             html.Th("지표명", rowSpan=2, style=_head_style(W_NAME, align="left")),
-                            html.Th("연준 통화정책 국면", rowSpan=1, style=_head_style(W_POLICY, align="center")),
+                            html.Th("연준 통화정책 국면", style=_head_style(W_POLICY)),
                         ]
                     ),
                     html.Tr(
                         [
-                            html.Th("", style=_head_style(W_POLICY)),
+                            html.Th("기준시기", style=_head_style(W_POLICY)),
                         ]
                     ),
                 ]
@@ -187,7 +187,7 @@ def _build_left_table(indicators, selected_series_codes):
                         [
                             html.Td(_checkbox_control(item["series_code"], selected_series_codes), style=_cell_style(W_SELECT)),
                             html.Td(item["indicator"], style=_cell_style(W_NAME, align="left", bold=True)),
-                            html.Td("", style=_cell_style(W_POLICY, align="center")),
+                            html.Td("실제", style=_cell_style(W_POLICY, align="left")),
                         ]
                     )
                     for item in indicators
@@ -196,27 +196,27 @@ def _build_left_table(indicators, selected_series_codes):
         ],
         style={
             **_table_base_style(),
-            "width": f"{W_SELECT + W_NAME + W_POLICY}px",
-            "minWidth": f"{W_SELECT + W_NAME + W_POLICY}px",
+            "width": f"{total_width}px",
+            "minWidth": f"{total_width}px",
         },
     )
-    return header
+    return table
 
 
 def _build_middle_table(period_keys, indicators):
-    total_width = W_TIME_LABEL + (len(period_keys) * W_TIME)
+    total_width = len(period_keys) * W_TIME
 
     header_row_1 = html.Tr(
         [
-            html.Th("기준시기", style=_head_style(W_TIME_LABEL, align="left")),
-            *[html.Th("", style=_head_style(W_TIME)) for _ in period_keys],
+            html.Th("", style=_head_style(W_TIME))
+            for _ in period_keys
         ]
     )
 
     header_row_2 = html.Tr(
         [
-            html.Th("", style=_head_style(W_TIME_LABEL, align="left")),
-            *[html.Th(key, style=_head_style(W_TIME)) for key in period_keys],
+            html.Th(key, style=_head_style(W_TIME))
+            for key in period_keys
         ]
     )
 
@@ -226,11 +226,8 @@ def _build_middle_table(period_keys, indicators):
         body_rows.append(
             html.Tr(
                 [
-                    html.Td("실제", style=_cell_style(W_TIME_LABEL, align="left")),
-                    *[
-                        html.Td(actual_map.get(key, ""), style=_cell_style(W_TIME))
-                        for key in period_keys
-                    ],
+                    html.Td(actual_map.get(key, ""), style=_cell_style(W_TIME))
+                    for key in period_keys
                 ]
             )
         )
@@ -255,6 +252,7 @@ def _build_middle_table(period_keys, indicators):
             "width": "100%",
             "borderTop": BORDER,
             "borderBottom": BORDER,
+            "backgroundColor": "white",
         },
     )
 
@@ -262,7 +260,7 @@ def _build_middle_table(period_keys, indicators):
 def _build_right_table(indicators):
     total_width = W_CHANGE + W_SPEED + W_TREND + W_RELEASE + (W_ASSET * 3)
 
-    header = html.Table(
+    table = html.Table(
         [
             html.Thead(
                 [
@@ -307,7 +305,7 @@ def _build_right_table(indicators):
             "minWidth": f"{total_width}px",
         },
     )
-    return header
+    return table
 
 
 # -------------------------
