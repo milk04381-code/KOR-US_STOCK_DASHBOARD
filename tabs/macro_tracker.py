@@ -6,23 +6,17 @@ Created on Wed Apr  8 13:27:30 2026
 """
 
 # tabs/macro_tracker.py
-# 수정 목적:
-# 1. 상단 2열 + 하단 1행 레이아웃 유지
-# 2. 좌상단: DB 기반 전체 시계열 표
-# 3. 우상단: 선택 지표 전체 시계열 차트
-# 4. 표는 좌우측 고정 열 + 내부 가로/세로 스크롤
-# 5. 표 가시폭은 좌측 패널 안으로 제한하여 우측 차트 유지
-# 6. period_keys(내부 key) / period_labels(화면 label) 분리 반영
-# 7. 정책 국면 임시값 반영
-# 8. 시작일 / 종료일 필터 추가
-# 9. 외곽 굵은 border 제거
+# 수정본
+
 
 from datetime import date
 
-from dash import dcc, html, Input, Output, ALL
+from dash import dcc, html, Input, Output, State, ALL
 import plotly.graph_objs as go
 
 from services.macro_tracker_service import get_macro_tracker_payload
+from services.data_service import load_chart_dataset
+from services.chart_service import build_main_figure
 
 COUNTRY_OPTIONS = [
     {"label": "미국", "value": "US"},
@@ -218,7 +212,7 @@ def _build_left_table(indicators, selected_series_codes):
     return table
 
 
-def _build_middle_table(period_keys, period_labels, indicators):
+def _build_middle_table(period_keys, period_labels, indicators, frequency):
     total_width = len(period_keys) * W_TIME
 
     header_row_1 = html.Tr(
@@ -261,11 +255,14 @@ def _build_middle_table(period_keys, period_labels, indicators):
 
     return html.Div(
         table,
+        id={"type": "macro-middle-scroll", "index": frequency},
+        className="macro-middle-scroll",
         style={
             "overflowX": "auto",
             "overflowY": "hidden",
             "width": "100%",
             "backgroundColor": "white",
+            "scrollBehavior": "auto",
         },
     )
 
@@ -325,6 +322,7 @@ def _build_right_table(indicators):
 # 주기별 표 하나
 # -------------------------
 def _build_one_frequency_table(section, selected_series_codes):
+    frequency = section["frequency"]
     period_keys = section["period_keys"]
     period_labels = section.get("period_labels", period_keys)
     indicators = section["indicators"]
@@ -336,7 +334,7 @@ def _build_one_frequency_table(section, selected_series_codes):
         )
 
     left_table = _build_left_table(indicators, selected_series_codes)
-    middle_table = _build_middle_table(period_keys, period_labels, indicators)
+    middle_table = _build_middle_table(period_keys, period_labels, indicators, frequency)
     right_table = _build_right_table(indicators)
 
     left_width = W_SELECT + W_NAME + W_POLICY
@@ -435,6 +433,7 @@ def get_layout():
     return dcc.Tab(
         label="경제지표 Tracker",
         children=[
+            dcc.Store(id="macro-scroll-trigger"),
             html.Div(
                 [
                     dcc.Store(id="macro-selected-series-codes", data=[]),
@@ -534,6 +533,11 @@ def get_layout():
                                         "왼쪽 표에서 선택한 지표를 전체 시계열 기준으로 시각화합니다.",
                                         style={"fontSize": "14px", "color": "#666", "marginBottom": "8px"},
                                     ),
+                                    dcc.Checklist(
+                                        id="macro-recession-check",
+                                        options=[{"label": "Recession 음영 표시", "value": "show"}],
+                                        value=["show"],
+                                    ),
                                     dcc.Graph(id="macro-main-chart", style={"height": "760px"}),
                                 ],
                                 style={
@@ -554,13 +558,34 @@ def get_layout():
 
 
 def register_callbacks(app):
+    app.clientside_callback(
+        """
+        function(trigger_value) {
+            if (!trigger_value) {
+                return "";
+            }
+            setTimeout(function() {
+                const nodes = document.querySelectorAll('.macro-middle-scroll');
+                nodes.forEach(function(node) {
+                    node.scrollLeft = node.scrollWidth;
+                });
+            }, 0);
+            return "";
+        }
+        """,
+        Output("macro-scroll-trigger", "data", allow_duplicate=True),
+        Input("macro-scroll-trigger", "data"),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output("macro-table-container", "children"),
+        Output("macro-scroll-trigger", "data"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
         Input("macro-start-date", "date"),
         Input("macro-end-date", "date"),
-        Input("macro-selected-series-codes", "data"),
+        State("macro-selected-series-codes", "data"),
     )
     def render_macro_table(country, category, start_date, end_date, selected_series_codes):
         if start_date is None:
@@ -582,7 +607,15 @@ def register_callbacks(app):
                 valid_codes.add(item["series_code"])
 
         filtered_selected = [x for x in selected_series_codes if x in valid_codes]
-        return _build_tables(payload, selected_series_codes=filtered_selected)
+
+        trigger_value = {
+            "country": country,
+            "category": category,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+
+        return _build_tables(payload, selected_series_codes=filtered_selected), trigger_value
 
     @app.callback(
         Output("macro-selected-series-codes", "data"),
@@ -605,10 +638,9 @@ def register_callbacks(app):
         Input("macro-category-dropdown", "value"),
         Input("macro-start-date", "date"),
         Input("macro-end-date", "date"),
+        Input("macro-recession-check", "value"),
     )
-    def update_macro_chart(selected_series_codes, country, category, start_date, end_date):
-        fig = go.Figure()
-
+    def update_macro_chart(selected_series_codes, country, category, start_date, end_date, recession_value):
         if start_date is None:
             start_date = "1970-01-01"
         if end_date is None:
@@ -620,16 +652,16 @@ def register_callbacks(app):
             start_date=start_date,
             end_date=end_date,
         )
-        selected_series_codes = selected_series_codes or []
 
-        item_map = {}
+        valid_codes = set()
         for section in payload.get("sections", []):
             for item in section.get("indicators", []):
-                item_map[item["series_code"]] = item
+                valid_codes.add(item["series_code"])
 
-        selected_visible = [x for x in selected_series_codes if x in item_map]
+        selected_series_codes = [x for x in (selected_series_codes or []) if x in valid_codes]
 
-        if not selected_visible:
+        if not selected_series_codes:
+            fig = go.Figure()
             fig.update_layout(
                 template="plotly_white",
                 title="선택된 지표가 없습니다.",
@@ -637,28 +669,21 @@ def register_callbacks(app):
             )
             return fig
 
-        for series_code in selected_visible:
-            item = item_map[series_code]
-            series = item.get("series", [])
-            if not series:
-                continue
+        dataset = load_chart_dataset(
+            selected_codes=selected_series_codes,
+            start_date=start_date,
+            end_date=end_date,
+            axis_override_map=None,
+        )
 
-            fig.add_trace(
-                go.Scatter(
-                    x=[row["date"] for row in series],
-                    y=[row["value"] for row in series],
-                    mode="lines+markers",
-                    name=item["indicator"],
-                )
-            )
+        fig = build_main_figure(
+            dataset=dataset,
+            start_date=start_date,
+            end_date=end_date,
+            show_recession=("show" in (recession_value or [])),
+        )
 
         fig.update_layout(
-            template="plotly_white",
             title=f"선택 지표 시계열 ({start_date} ~ {end_date})",
-            margin={"l": 40, "r": 20, "t": 60, "b": 40},
-            hovermode="x unified",
-            xaxis_title="날짜",
-            yaxis_title="값",
-            legend={"orientation": "h", "y": 1.02, "x": 0},
         )
         return fig
