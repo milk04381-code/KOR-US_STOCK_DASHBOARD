@@ -6,6 +6,12 @@ Created on Wed Apr  8 18:13:41 2026
 """
 # services/macro_tracker_service.py 
 # 수정본
+# 핵심 수정:
+# 1) 월간 period key 충돌 방지
+#    - 내부 key: YYYYMM
+#    - 화면 label: YYMM
+# 2) period key / period label 분리
+# 3) 장기 시계열(예: 1926-03, 2026-03) 충돌 제거
 
 from copy import deepcopy
 
@@ -160,11 +166,40 @@ def choose_display_name(meta_row):
 
 
 def format_period_key(ts, frequency):
+    """
+    내부 식별용 key
+    - 반드시 유일해야 함
+    - 월간은 YYYYMM 사용하여 192603 / 202603 충돌 방지
+    """
     dt = pd.to_datetime(ts)
     freq = normalize_frequency(frequency)
 
     if freq == "monthly":
-        return dt.strftime("%y%m")
+        return dt.strftime("%Y%m")
+    if freq == "weekly":
+        return dt.strftime("%Y%m%d")
+    if freq == "daily":
+        return dt.strftime("%Y%m%d")
+    if freq == "quarterly":
+        quarter = ((dt.month - 1) // 3) + 1
+        return f"{dt.strftime('%Y')}Q{quarter}"
+    if freq == "yearly":
+        return dt.strftime("%Y")
+
+    return dt.strftime("%Y-%m-%d")
+
+
+def format_period_label(ts, frequency):
+    """
+    화면 표시용 label
+    - 월간은 기존 UI 느낌을 유지하려고 YYMM 사용
+    - 내부 key와 분리해서 충돌만 방지
+    """
+    dt = pd.to_datetime(ts)
+    freq = normalize_frequency(frequency)
+
+    if freq == "monthly":
+        return dt.strftime("%Y%m")
     if freq == "weekly":
         return dt.strftime("%y%m%d")
     if freq == "daily":
@@ -193,7 +228,15 @@ def format_value_for_table(value, indicator, unit, frequency):
     if indicator == "NFP":
         return f"{value:,.0f}k"
 
-    if indicator in ("실업률", "참여율", "CPI", "한국 실업률", "광의실업률(U6)", "설비가동률", "10년 기대인플레이션"):
+    if indicator in (
+        "실업률",
+        "참여율",
+        "CPI",
+        "한국 실업률",
+        "광의실업률(U6)",
+        "설비가동률",
+        "10년 기대인플레이션",
+    ):
         return f"{value:.1f}%"
 
     if indicator == "주택착공":
@@ -450,7 +493,6 @@ def build_indicator_item(meta_row, section_keys, series_df):
             key = format_period_key(row["date_value"], frequency)
             value_num = float(row["value_num"])
 
-            # 같은 key가 여러 번 생기면 가장 마지막 값으로 덮어씀
             actual_map[key] = format_value_for_table(
                 value=value_num,
                 indicator=display_name,
@@ -495,15 +537,18 @@ def build_section_payload(meta_df, data_df, frequency):
 
     if section_data.empty:
         period_keys = []
+        period_labels = []
     else:
-        period_keys = (
+        period_dates = (
             section_data["date_value"]
+            .dropna()
             .drop_duplicates()
             .sort_values()
-            .apply(lambda x: format_period_key(x, frequency))
-            .drop_duplicates()
             .tolist()
         )
+
+        period_keys = [format_period_key(x, frequency) for x in period_dates]
+        period_labels = [format_period_label(x, frequency) for x in period_dates]
 
     indicators = []
     for _, meta_row in section_meta.iterrows():
@@ -516,6 +561,7 @@ def build_section_payload(meta_df, data_df, frequency):
         "frequency": frequency,
         "frequency_label": FREQUENCY_LABEL_MAP.get(frequency, frequency),
         "period_keys": period_keys,
+        "period_labels": period_labels,
         "indicators": indicators,
     }
 

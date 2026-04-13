@@ -13,6 +13,7 @@ Created on Wed Apr  8 13:27:30 2026
 # 3. 우상단: 선택 지표 전체 시계열 차트
 # 4. 표는 좌우측 고정 열 + 내부 가로/세로 스크롤
 # 5. 표 가시폭은 좌측 패널 안으로 제한하여 우측 차트 유지
+# 6. period_keys(내부 key) / period_labels(화면 label) 분리 반영
 
 from dash import dcc, html, Input, Output, ALL
 import plotly.graph_objs as go
@@ -185,8 +186,14 @@ def _build_left_table(indicators, selected_series_codes):
                 [
                     html.Tr(
                         [
-                            html.Td(_checkbox_control(item["series_code"], selected_series_codes), style=_cell_style(W_SELECT)),
-                            html.Td(item["indicator"], style=_cell_style(W_NAME, align="left", bold=True)),
+                            html.Td(
+                                _checkbox_control(item["series_code"], selected_series_codes),
+                                style=_cell_style(W_SELECT),
+                            ),
+                            html.Td(
+                                item["indicator"],
+                                style=_cell_style(W_NAME, align="left", bold=True),
+                            ),
                             html.Td("실제", style=_cell_style(W_POLICY, align="left")),
                         ]
                     )
@@ -203,7 +210,7 @@ def _build_left_table(indicators, selected_series_codes):
     return table
 
 
-def _build_middle_table(period_keys, indicators):
+def _build_middle_table(period_keys, period_labels, indicators):
     total_width = len(period_keys) * W_TIME
 
     header_row_1 = html.Tr(
@@ -215,8 +222,8 @@ def _build_middle_table(period_keys, indicators):
 
     header_row_2 = html.Tr(
         [
-            html.Th(key, style=_head_style(W_TIME))
-            for key in period_keys
+            html.Th(label, style=_head_style(W_TIME))
+            for label in period_labels
         ]
     )
 
@@ -313,6 +320,7 @@ def _build_right_table(indicators):
 # -------------------------
 def _build_one_frequency_table(section, selected_series_codes):
     period_keys = section["period_keys"]
+    period_labels = section.get("period_labels", period_keys)
     indicators = section["indicators"]
 
     if not indicators:
@@ -322,7 +330,7 @@ def _build_one_frequency_table(section, selected_series_codes):
         )
 
     left_table = _build_left_table(indicators, selected_series_codes)
-    middle_table = _build_middle_table(period_keys, indicators)
+    middle_table = _build_middle_table(period_keys, period_labels, indicators)
     right_table = _build_right_table(indicators)
 
     left_width = W_SELECT + W_NAME + W_POLICY
