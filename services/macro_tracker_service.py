@@ -6,12 +6,6 @@ Created on Wed Apr  8 18:13:41 2026
 """
 # services/macro_tracker_service.py 
 # 수정본
-# 핵심 수정:
-# 1) 월간 period key 충돌 방지
-#    - 내부 key: YYYYMM
-#    - 화면 label: YYMM
-# 2) period key / period label 분리
-# 3) 장기 시계열(예: 1926-03, 2026-03) 충돌 제거
 
 from copy import deepcopy
 
@@ -23,6 +17,9 @@ from db import engine
 
 # -------------------------
 # RULE MAP
+# - 표시명 기준 계산 규칙
+# - CPI / PPI / 광공업생산 / 소매판매는 RAW level series이므로
+#   전기 대비 변동은 pct_change 기준으로 처리
 # -------------------------
 RULE_MAP = {
     "NFP": {
@@ -52,8 +49,18 @@ RULE_MAP = {
     },
     "CPI": {
         "trend_unit": "개월",
-        "change_calc_type": "pp_diff",
-        "speed_calc_type": "pp_diff",
+        "change_calc_type": "pct_change",
+        "speed_calc_type": "pct_change",
+    },
+    "PPI": {
+        "trend_unit": "개월",
+        "change_calc_type": "pct_change",
+        "speed_calc_type": "pct_change",
+    },
+    "PCE 물가지수": {
+        "trend_unit": "개월",
+        "change_calc_type": "pct_change",
+        "speed_calc_type": "pct_change",
     },
     "주택착공": {
         "trend_unit": "개월",
@@ -67,6 +74,16 @@ RULE_MAP = {
     },
     "한국 실업률": {
         "trend_unit": "개월",
+        "change_calc_type": "pp_diff",
+        "speed_calc_type": "pp_diff",
+    },
+    "설비가동률": {
+        "trend_unit": "개월",
+        "change_calc_type": "pp_diff",
+        "speed_calc_type": "pp_diff",
+    },
+    "10년 기대인플레이션": {
+        "trend_unit": "일",
         "change_calc_type": "pp_diff",
         "speed_calc_type": "pp_diff",
     },
@@ -166,14 +183,10 @@ def choose_display_name(meta_row):
 
 
 def format_period_key(ts, frequency):
-    """
-    내부 식별용 key
-    - 반드시 유일해야 함
-    - 월간은 YYYYMM 사용하여 192603 / 202603 충돌 방지
-    """
     dt = pd.to_datetime(ts)
     freq = normalize_frequency(frequency)
 
+    # 내부 식별용 key는 유일해야 함
     if freq == "monthly":
         return dt.strftime("%Y%m")
     if freq == "weekly":
@@ -190,14 +203,10 @@ def format_period_key(ts, frequency):
 
 
 def format_period_label(ts, frequency):
-    """
-    화면 표시용 label
-    - 월간은 기존 UI 느낌을 유지하려고 YYMM 사용
-    - 내부 key와 분리해서 충돌만 방지
-    """
     dt = pd.to_datetime(ts)
     freq = normalize_frequency(frequency)
 
+    # 화면 표시용 label
     if freq == "monthly":
         return dt.strftime("%Y%m")
     if freq == "weekly":
@@ -217,31 +226,28 @@ def format_chart_date(ts):
     return pd.to_datetime(ts).strftime("%Y-%m-%d")
 
 
-def format_value_for_table(value, indicator, unit, frequency):
+def format_value_for_table(value, series_code, unit, frequency):
     if value is None or pd.isna(value):
         return ""
 
-    indicator = clean_str(indicator)
+    series_code = clean_str(series_code).upper()
     unit = clean_str(unit).lower()
     frequency = normalize_frequency(frequency)
 
-    if indicator == "NFP":
+    # -------------------------
+    # 최소 예외 처리
+    # -------------------------
+    # PAYEMS: FRED unit = thousand_persons
+    if series_code == "PAYEMS":
         return f"{value:,.0f}k"
 
-    if indicator in (
-        "실업률",
-        "참여율",
-        "CPI",
-        "한국 실업률",
-        "광의실업률(U6)",
-        "설비가동률",
-        "10년 기대인플레이션",
-    ):
-        return f"{value:.1f}%"
+    # T10YIE: 소수 둘째 자리까지
+    if series_code == "T10YIE":
+        return f"{value:.2f}%"
 
-    if indicator == "주택착공":
-        return f"{value:.2f}"
-
+    # -------------------------
+    # 기본 포맷: unit 기준
+    # -------------------------
     if "%" in unit or "percent" in unit or "percentage" in unit:
         return f"{value:.1f}%"
 
@@ -448,12 +454,19 @@ def load_macro_meta(country="US", category="ALL"):
     return df
 
 
-def load_macro_series_values(series_codes):
+def load_macro_series_values(series_codes, start_date=None, end_date=None):
     if not series_codes:
         return pd.DataFrame(columns=["series_code", "date_value", "value_num"])
 
+    if start_date is None:
+        start_date = "1970-01-01"
+    if end_date is None:
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+
     placeholders = ", ".join([f":code_{idx}" for idx in range(len(series_codes))])
     params = {f"code_{idx}": code for idx, code in enumerate(series_codes)}
+    params["start_date"] = start_date
+    params["end_date"] = end_date
 
     query = text(f"""
         SELECT
@@ -464,6 +477,7 @@ def load_macro_series_values(series_codes):
         JOIN series_meta m
           ON d.series_id = m.series_id
         WHERE m.series_code IN ({placeholders})
+          AND d.date_value BETWEEN :start_date AND :end_date
         ORDER BY m.series_code, d.date_value
     """)
 
@@ -495,7 +509,7 @@ def build_indicator_item(meta_row, section_keys, series_df):
 
             actual_map[key] = format_value_for_table(
                 value=value_num,
-                indicator=display_name,
+                series_code=series_code,
                 unit=unit,
                 frequency=frequency,
             )
@@ -507,6 +521,7 @@ def build_indicator_item(meta_row, section_keys, series_df):
                 }
             )
 
+        # 현재 구조상 release_date는 실제 발표일이 아니라 마지막 관측일
         release_date = format_chart_date(series_df["date_value"].max())
     else:
         release_date = ""
@@ -516,6 +531,8 @@ def build_indicator_item(meta_row, section_keys, series_df):
         "indicator": display_name,
         "category": clean_str(meta_row.get("macro_category")),
         "release_date": release_date,
+        "policy_phase": "유지",
+        "policy_phase_base": "현재",
         "asset_moves": {"stock": "", "bond": "", "fx": ""},
         "actual": actual_map,
         "series": series_rows,
@@ -569,7 +586,10 @@ def build_section_payload(meta_df, data_df, frequency):
 # -------------------------
 # 외부 제공 함수
 # -------------------------
-def get_macro_tracker_payload(country="US", category="ALL"):
+def get_macro_tracker_payload(country="US", category="ALL", start_date="1970-01-01", end_date=None):
+    if end_date is None:
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+
     meta_df = load_macro_meta(country=country, category=category)
 
     if meta_df.empty:
@@ -579,7 +599,11 @@ def get_macro_tracker_payload(country="US", category="ALL"):
         }
 
     series_codes = meta_df["series_code"].dropna().astype(str).tolist()
-    data_df = load_macro_series_values(series_codes)
+    data_df = load_macro_series_values(
+        series_codes,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     if data_df.empty:
         return {

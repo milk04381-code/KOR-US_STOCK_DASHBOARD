@@ -6,7 +6,6 @@ Created on Wed Apr  8 13:27:30 2026
 """
 
 # tabs/macro_tracker.py
-# 수정본
 # 수정 목적:
 # 1. 상단 2열 + 하단 1행 레이아웃 유지
 # 2. 좌상단: DB 기반 전체 시계열 표
@@ -14,6 +13,11 @@ Created on Wed Apr  8 13:27:30 2026
 # 4. 표는 좌우측 고정 열 + 내부 가로/세로 스크롤
 # 5. 표 가시폭은 좌측 패널 안으로 제한하여 우측 차트 유지
 # 6. period_keys(내부 key) / period_labels(화면 label) 분리 반영
+# 7. 정책 국면 임시값 반영
+# 8. 시작일 / 종료일 필터 추가
+# 9. 외곽 굵은 border 제거
+
+from datetime import date
 
 from dash import dcc, html, Input, Output, ALL
 import plotly.graph_objs as go
@@ -194,7 +198,11 @@ def _build_left_table(indicators, selected_series_codes):
                                 item["indicator"],
                                 style=_cell_style(W_NAME, align="left", bold=True),
                             ),
-                            html.Td("실제", style=_cell_style(W_POLICY, align="left")),
+                            html.Td(
+                                item.get("policy_phase", "유지"),
+                                style=_cell_style(W_POLICY, align="left"),
+                                title=item.get("policy_phase_base", "현재"),
+                            ),
                         ]
                     )
                     for item in indicators
@@ -257,8 +265,6 @@ def _build_middle_table(period_keys, period_labels, indicators):
             "overflowX": "auto",
             "overflowY": "hidden",
             "width": "100%",
-            "borderTop": BORDER,
-            "borderBottom": BORDER,
             "backgroundColor": "white",
         },
     )
@@ -372,8 +378,6 @@ def _build_one_frequency_table(section, selected_series_codes):
                     "display": "flex",
                     "alignItems": "flex-start",
                     "gap": "0px",
-                    "borderLeft": BORDER,
-                    "borderRight": BORDER,
                     "backgroundColor": "white",
                 },
             ),
@@ -421,7 +425,12 @@ def _build_investing_iframe_block():
 
 
 def get_layout():
-    initial_payload = get_macro_tracker_payload(country="US", category="ALL")
+    initial_payload = get_macro_tracker_payload(
+        country="US",
+        category="ALL",
+        start_date="1970-01-01",
+        end_date=None,
+    )
 
     return dcc.Tab(
         label="경제지표 Tracker",
@@ -456,6 +465,39 @@ def get_layout():
                                                         options=CATEGORY_OPTIONS,
                                                         value="ALL",
                                                         clearable=False,
+                                                    ),
+                                                ],
+                                                style={"width": "48%"},
+                                            ),
+                                        ],
+                                        style={
+                                            "display": "flex",
+                                            "justifyContent": "space-between",
+                                            "gap": "12px",
+                                            "marginBottom": "16px",
+                                        },
+                                    ),
+                                    html.Div(
+                                        [
+                                            html.Div(
+                                                [
+                                                    html.Label("시작일", style={"fontWeight": "bold", "marginBottom": "6px"}),
+                                                    dcc.DatePickerSingle(
+                                                        id="macro-start-date",
+                                                        date="1970-01-01",
+                                                        display_format="YYYY-MM-DD",
+                                                    ),
+                                                ],
+                                                style={"width": "48%"},
+                                            ),
+                                            html.Div(
+                                                [
+                                                    html.Label("종료일", style={"fontWeight": "bold", "marginBottom": "6px"}),
+                                                    dcc.DatePickerSingle(
+                                                        id="macro-end-date",
+                                                        date=None,
+                                                        display_format="YYYY-MM-DD",
+                                                        placeholder="종료일 비우면 오늘 날짜 자동",
                                                     ),
                                                 ],
                                                 style={"width": "48%"},
@@ -516,10 +558,22 @@ def register_callbacks(app):
         Output("macro-table-container", "children"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
+        Input("macro-start-date", "date"),
+        Input("macro-end-date", "date"),
         Input("macro-selected-series-codes", "data"),
     )
-    def render_macro_table(country, category, selected_series_codes):
-        payload = get_macro_tracker_payload(country=country, category=category)
+    def render_macro_table(country, category, start_date, end_date, selected_series_codes):
+        if start_date is None:
+            start_date = "1970-01-01"
+        if end_date is None:
+            end_date = date.today().isoformat()
+
+        payload = get_macro_tracker_payload(
+            country=country,
+            category=category,
+            start_date=start_date,
+            end_date=end_date,
+        )
         selected_series_codes = selected_series_codes or []
 
         valid_codes = set()
@@ -549,10 +603,23 @@ def register_callbacks(app):
         Input("macro-selected-series-codes", "data"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
+        Input("macro-start-date", "date"),
+        Input("macro-end-date", "date"),
     )
-    def update_macro_chart(selected_series_codes, country, category):
+    def update_macro_chart(selected_series_codes, country, category, start_date, end_date):
         fig = go.Figure()
-        payload = get_macro_tracker_payload(country=country, category=category)
+
+        if start_date is None:
+            start_date = "1970-01-01"
+        if end_date is None:
+            end_date = date.today().isoformat()
+
+        payload = get_macro_tracker_payload(
+            country=country,
+            category=category,
+            start_date=start_date,
+            end_date=end_date,
+        )
         selected_series_codes = selected_series_codes or []
 
         item_map = {}
@@ -587,7 +654,7 @@ def register_callbacks(app):
 
         fig.update_layout(
             template="plotly_white",
-            title="선택 지표 전체 시계열",
+            title=f"선택 지표 시계열 ({start_date} ~ {end_date})",
             margin={"l": 40, "r": 20, "t": 60, "b": 40},
             hovermode="x unified",
             xaxis_title="날짜",
