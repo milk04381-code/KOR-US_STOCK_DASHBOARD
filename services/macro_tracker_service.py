@@ -11,7 +11,7 @@ Created on Wed Apr  8 18:13:41 2026
 # 1) 전기 대비 변동 / 속도 / 추세 로직 수정
 # - NFP change_calc_type: diff
 # - 계산 입력: 표시 문자열이 아닌 raw numeric 기준
-# - 속도: 상승 가속 / 상승 둔화 / 하락 가속 / 하락 둔화 / 유지
+# - 속도: 상승 가속 / 상승 둔화 / 하락 가속 / 하락 둔화 / 유지 / 상승 전환 / 하락 전환
 # - 추세: 방향 지속기간 (상승 n개월 / 하락 n개월 / 유지 n개월)
 #
 # 2) 정책 국면 칼럼 구현
@@ -132,6 +132,7 @@ FREQUENCY_LABEL_MAP = {
 }
 
 POLICY_CUTOFF_DATE = pd.Timestamp("2008-12-16")
+EPS = 1e-12
 
 
 # -------------------------
@@ -141,32 +142,6 @@ def clean_str(value):
     if value is None:
         return ""
     return str(value).strip()
-
-
-def parse_display_value(value):
-    if value is None:
-        return None
-
-    text_value = str(value).strip()
-
-    if text_value == "":
-        return None
-
-    text_value = text_value.replace(",", "")
-
-    if text_value.endswith("%p"):
-        return float(text_value[:-2])
-
-    if text_value.endswith("bp"):
-        return float(text_value[:-2])
-
-    if text_value.endswith("k"):
-        return float(text_value[:-1])
-
-    if text_value.endswith("%"):
-        return float(text_value[:-1])
-
-    return float(text_value)
 
 
 def normalize_frequency(value):
@@ -287,7 +262,7 @@ def _calc_change_value(current_value, previous_value, change_calc_type):
         return None
 
     if change_calc_type == "pct_change":
-        if previous_value == 0:
+        if abs(previous_value) < EPS:
             return None
         return ((current_value - previous_value) / abs(previous_value)) * 100.0
 
@@ -303,14 +278,27 @@ def _calc_change_value(current_value, previous_value, change_calc_type):
     return None
 
 
-def _format_change_value(change_value, change_calc_type):
+def _format_change_value(change_value, change_calc_type, series_code="", unit=""):
     if change_value is None:
         return ""
+
+    series_code = clean_str(series_code).upper()
+    unit = clean_str(unit).lower()
 
     if change_calc_type == "pct_change":
         return f"{change_value:+.1f}%"
 
     if change_calc_type == "diff":
+        # 단위 기준 + 최소 예외
+        if series_code == "PAYEMS":
+            return f"{change_value:+,.1f}k"
+
+        if "persons" in unit or "number" in unit:
+            return f"{change_value:+,.1f}"
+
+        if "index" in unit:
+            return f"{change_value:+.1f}"
+
         return f"{change_value:+.1f}"
 
     if change_calc_type == "pp_diff":
@@ -326,7 +314,25 @@ def _classify_speed(delta_prev, delta_curr):
     if delta_prev is None or delta_curr is None:
         return ""
 
-    if abs(delta_curr - delta_prev) < 1e-12:
+    if abs(delta_curr - delta_prev) < EPS:
+        return "유지"
+
+    # 방향 전환
+    if delta_prev < -EPS and delta_curr > EPS:
+        return "상승 전환"
+    if delta_prev > EPS and delta_curr < -EPS:
+        return "하락 전환"
+    if abs(delta_prev) <= EPS and delta_curr > EPS:
+        return "상승 전환"
+    if abs(delta_prev) <= EPS and delta_curr < -EPS:
+        return "하락 전환"
+
+    # current가 0이면 직전 방향의 둔화로 해석
+    if abs(delta_curr) <= EPS:
+        if delta_prev > EPS:
+            return "상승 둔화"
+        if delta_prev < -EPS:
+            return "하락 둔화"
         return "유지"
 
     direction = "상승" if delta_curr > 0 else "하락"
@@ -347,11 +353,11 @@ def _calc_speed_from_series(values, speed_calc_type):
     return _classify_speed(delta_prev, delta_curr)
 
 
-def _classify_direction(change_value, eps=1e-12):
+def _classify_direction(change_value):
     if change_value is None:
         return ""
 
-    if abs(change_value) < eps:
+    if abs(change_value) < EPS:
         return "유지"
     if change_value > 0:
         return "상승"
@@ -474,9 +480,6 @@ def build_policy_phase_by_period(period_dates, frequency, policy_df, country_cod
         return {}
 
     freq = normalize_frequency(frequency)
-
-    # period_dates는 이미 해당 section의 기준시기 실제 날짜 리스트
-    # 각 기준시기 날짜를 직전 기준시기 날짜와 비교
     policy_map = {}
     ordered_dates = pd.to_datetime(pd.Series(period_dates)).sort_values().tolist()
 
@@ -488,7 +491,6 @@ def build_policy_phase_by_period(period_dates, frequency, policy_df, country_cod
             continue
 
         prev_ref = ordered_dates[idx - 1]
-
         previous_rate = _get_policy_target_asof(policy_df, prev_ref)
         current_rate = _get_policy_target_asof(policy_df, curr_ref)
 
@@ -526,6 +528,8 @@ def _enrich_indicator(item, period_keys):
     enriched["change_display"] = _format_change_value(
         change_value,
         rule["change_calc_type"],
+        series_code=item.get("series_code", ""),
+        unit=item.get("unit", ""),
     )
     enriched["speed"] = _calc_speed_from_series(
         actual_values,

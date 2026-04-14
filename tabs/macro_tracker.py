@@ -5,14 +5,14 @@ Created on Wed Apr  8 13:27:30 2026
 @author: 박승욱
 """
 
+
 # tabs/macro_tracker.py
 # 수정본
 # 반영 사항:
-# 1) 좌측 고정 테이블의 '연준 통화정책 국면' 단일 컬럼 제거
-# 2) 가운데 시계열 헤더 1행에 기준시기별 정책 국면 표시
-# 3) 헤더 2행은 기준시기(YYYYMM / YYMMDD / YYQn 등) 유지
+# 1) 가운데 시계열 헤더 1행 왼쪽에 '연준의 통화정책 국면' 라벨 복구
+# 2) 가운데 시계열 헤더 2행 왼쪽에 '기준시기' 라벨 복구
+# 3) 스크롤 기본 위치를 오른쪽 끝으로 다시 보정
 # 4) 기존 레이아웃 구조는 최대한 유지
-
 
 from datetime import date
 
@@ -79,6 +79,7 @@ INVESTING_EMBED_HTML = """
 W_SELECT = 44
 W_NAME = 120
 
+W_TIME_LABEL = 92
 W_TIME = 72
 
 W_CHANGE = 78
@@ -207,24 +208,30 @@ def _build_left_table(indicators, selected_series_codes):
 
 
 def _build_middle_table(period_keys, period_labels, indicators, frequency, policy_phase_by_period=None):
-    total_width = len(period_keys) * W_TIME
     policy_phase_by_period = policy_phase_by_period or {}
+    total_width = W_TIME_LABEL + (len(period_keys) * W_TIME)
 
     header_row_1 = html.Tr(
         [
-            html.Th(
-                policy_phase_by_period.get(key, ""),
-                style=_head_style(W_TIME),
-                title=policy_phase_by_period.get(key, ""),
-            )
-            for key in period_keys
+            html.Th("연준의 통화정책 국면", style=_head_style(W_TIME_LABEL, align="center")),
+            *[
+                html.Th(
+                    policy_phase_by_period.get(key, ""),
+                    style=_head_style(W_TIME),
+                    title=policy_phase_by_period.get(key, ""),
+                )
+                for key in period_keys
+            ],
         ]
     )
 
     header_row_2 = html.Tr(
         [
-            html.Th(label, style=_head_style(W_TIME))
-            for label in period_labels
+            html.Th("기준시기", style=_head_style(W_TIME_LABEL, align="center")),
+            *[
+                html.Th(label, style=_head_style(W_TIME))
+                for label in period_labels
+            ],
         ]
     )
 
@@ -234,8 +241,11 @@ def _build_middle_table(period_keys, period_labels, indicators, frequency, polic
         body_rows.append(
             html.Tr(
                 [
-                    html.Td(actual_map.get(key, ""), style=_cell_style(W_TIME))
-                    for key in period_keys
+                    html.Td("", style=_cell_style(W_TIME_LABEL)),
+                    *[
+                        html.Td(actual_map.get(key, ""), style=_cell_style(W_TIME))
+                        for key in period_keys
+                    ],
                 ]
             )
         )
@@ -573,9 +583,9 @@ def register_callbacks(app):
             setTimeout(function() {
                 const nodes = document.querySelectorAll('.macro-middle-scroll');
                 nodes.forEach(function(node) {
-                    node.scrollLeft = node.scrollWidth;
+                    node.scrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
                 });
-            }, 0);
+            }, 80);
             return "";
         }
         """,
