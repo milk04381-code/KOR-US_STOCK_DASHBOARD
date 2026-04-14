@@ -12,7 +12,9 @@ Created on Wed Apr  8 13:27:30 2026
 # 1) 가운데 시계열 헤더 1행 왼쪽에 '연준의 통화정책 국면' 라벨 복구
 # 2) 가운데 시계열 헤더 2행 왼쪽에 '기준시기' 라벨 복구
 # 3) 스크롤 기본 위치를 오른쪽 끝으로 다시 보정
-# 4) 기존 레이아웃 구조는 최대한 유지
+# 4) 선택/지표명 헤더를 2행 구조로 통일
+# 5) 전기 대비 변동 헤더 줄바꿈 허용
+# 6) 기존 레이아웃 구조는 최대한 유지
 
 from datetime import date
 
@@ -120,20 +122,28 @@ def _cell_style(width, bg="white", align="center", bold=False):
     return style
 
 
-def _head_style(width=None, bg="#f2f2f2", align="center", height=HEAD_HEIGHT):
+def _head_style(
+    width=None,
+    bg="#f2f2f2",
+    align="center",
+    height=HEAD_HEIGHT,
+    nowrap=True,
+    overflow_hidden=True,
+):
     style = {
         "border": BORDER,
         "padding": "4px 6px",
         "textAlign": align,
         "verticalAlign": "middle",
-        "whiteSpace": "nowrap",
+        "whiteSpace": "nowrap" if nowrap else "normal",
         "fontSize": "12px",
         "backgroundColor": bg,
         "boxSizing": "border-box",
         "height": f"{height}px",
         "lineHeight": "1.2",
-        "overflow": "hidden",
-        "textOverflow": "ellipsis",
+        "overflow": "hidden" if overflow_hidden else "visible",
+        "textOverflow": "ellipsis" if overflow_hidden else "clip",
+        "wordBreak": "keep-all",
     }
     if width is not None:
         style["width"] = f"{width}px"
@@ -173,11 +183,16 @@ def _build_left_table(indicators, selected_series_codes):
                 [
                     html.Tr(
                         [
-                            html.Th("선택", rowSpan=2, style=_head_style(W_SELECT)),
-                            html.Th("지표명", rowSpan=2, style=_head_style(W_NAME, align="left")),
+                            html.Th("", style=_head_style(W_SELECT)),
+                            html.Th("", style=_head_style(W_NAME, align="left")),
                         ]
                     ),
-                    html.Tr([]),
+                    html.Tr(
+                        [
+                            html.Th("선택", style=_head_style(W_SELECT)),
+                            html.Th("지표명", style=_head_style(W_NAME, align="left")),
+                        ]
+                    ),
                 ]
             ),
             html.Tbody(
@@ -285,7 +300,15 @@ def _build_right_table(indicators):
                 [
                     html.Tr(
                         [
-                            html.Th("전기 대비 변동", rowSpan=2, style=_head_style(W_CHANGE)),
+                            html.Th(
+                                "전기 대비 변동",
+                                rowSpan=2,
+                                style=_head_style(
+                                    W_CHANGE,
+                                    nowrap=False,
+                                    overflow_hidden=False,
+                                ),
+                            ),
                             html.Th("속도", rowSpan=2, style=_head_style(W_SPEED)),
                             html.Th("추세", rowSpan=2, style=_head_style(W_TREND)),
                             html.Th("발표일", rowSpan=2, style=_head_style(W_RELEASE)),
