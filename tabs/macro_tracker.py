@@ -12,9 +12,10 @@ Created on Wed Apr  8 13:27:30 2026
 # 1) 가운데 시계열 헤더 1행 왼쪽에 '연준의 통화정책 국면' 라벨 복구
 # 2) 가운데 시계열 헤더 2행 왼쪽에 '기준시기' 라벨 복구
 # 3) 스크롤 기본 위치를 오른쪽 끝으로 다시 보정
-# 4) 선택/지표명 헤더를 2행 구조로 통일
+# 4) 선택/지표명 헤더를 rowSpan=2 단일 셀로 복구
 # 5) 전기 대비 변동 헤더 줄바꿈 허용
-# 6) 기존 레이아웃 구조는 최대한 유지
+# 6) 체크박스 선택 시 우측 차트 즉시 반응하도록 보강
+# 7) 기존 레이아웃 구조는 최대한 유지
 
 from datetime import date
 
@@ -183,16 +184,11 @@ def _build_left_table(indicators, selected_series_codes):
                 [
                     html.Tr(
                         [
-                            html.Th("", style=_head_style(W_SELECT)),
-                            html.Th("", style=_head_style(W_NAME, align="left")),
+                            html.Th("선택", rowSpan=2, style=_head_style(W_SELECT)),
+                            html.Th("지표명", rowSpan=2, style=_head_style(W_NAME, align="left")),
                         ]
                     ),
-                    html.Tr(
-                        [
-                            html.Th("선택", style=_head_style(W_SELECT)),
-                            html.Th("지표명", style=_head_style(W_NAME, align="left")),
-                        ]
-                    ),
+                    html.Tr([]),
                 ]
             ),
             html.Tbody(
@@ -473,6 +469,7 @@ def get_layout():
         label="경제지표 Tracker",
         children=[
             dcc.Store(id="macro-scroll-trigger"),
+            dcc.Store(id="macro-scroll-done"),
             html.Div(
                 [
                     dcc.Store(id="macro-selected-series-codes", data=[]),
@@ -608,11 +605,11 @@ def register_callbacks(app):
                 nodes.forEach(function(node) {
                     node.scrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
                 });
-            }, 80);
-            return "";
+            }, 120);
+            return "done";
         }
         """,
-        Output("macro-scroll-trigger", "data", allow_duplicate=True),
+        Output("macro-scroll-done", "data"),
         Input("macro-scroll-trigger", "data"),
         prevent_initial_call=True,
     )
@@ -652,6 +649,7 @@ def register_callbacks(app):
             "category": category,
             "start_date": start_date,
             "end_date": end_date,
+            "ts": date.today().isoformat(),
         }
 
         return _build_tables(payload, selected_series_codes=filtered_selected), trigger_value
@@ -673,13 +671,24 @@ def register_callbacks(app):
     @app.callback(
         Output("macro-main-chart", "figure"),
         Input("macro-selected-series-codes", "data"),
+        Input({"type": "macro-checklist", "index": ALL}, "value"),
+        Input({"type": "macro-checklist", "index": ALL}, "id"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
         Input("macro-start-date", "date"),
         Input("macro-end-date", "date"),
         Input("macro-recession-check", "value"),
     )
-    def update_macro_chart(selected_series_codes, country, category, start_date, end_date, recession_value):
+    def update_macro_chart(
+        selected_series_codes_store,
+        check_values,
+        check_ids,
+        country,
+        category,
+        start_date,
+        end_date,
+        recession_value,
+    ):
         if start_date is None:
             start_date = "1970-01-01"
         if end_date is None:
@@ -697,7 +706,13 @@ def register_callbacks(app):
             for item in section.get("indicators", []):
                 valid_codes.add(item["series_code"])
 
-        selected_series_codes = [x for x in (selected_series_codes or []) if x in valid_codes]
+        selected_from_checks = []
+        for values, comp_id in zip(check_values, check_ids):
+            if values and comp_id["index"] in values:
+                selected_from_checks.append(comp_id["index"])
+
+        selected_series_codes = selected_from_checks or (selected_series_codes_store or [])
+        selected_series_codes = [x for x in selected_series_codes if x in valid_codes]
 
         if not selected_series_codes:
             fig = go.Figure()
@@ -714,6 +729,15 @@ def register_callbacks(app):
             end_date=end_date,
             axis_override_map=None,
         )
+
+        if dataset is None or dataset.empty:
+            fig = go.Figure()
+            fig.update_layout(
+                template="plotly_white",
+                title="데이터가 없습니다.",
+                margin={"l": 40, "r": 20, "t": 60, "b": 40},
+            )
+            return fig
 
         fig = build_main_figure(
             dataset=dataset,
