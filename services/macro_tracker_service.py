@@ -4,8 +4,26 @@ Created on Wed Apr  8 18:13:41 2026
 
 @author: 박승욱
 """
-# services/macro_tracker_service.py 
+
+# services/macro_tracker_service.py
 # 수정본
+# 반영 범위:
+# 1) 전기 대비 변동 / 속도 / 추세 로직 수정
+# - NFP change_calc_type: diff
+# - 계산 입력: 표시 문자열이 아닌 raw numeric 기준
+# - 속도: 상승 가속 / 상승 둔화 / 하락 가속 / 하락 둔화 / 유지
+# - 추세: 방향 지속기간 (상승 n개월 / 하락 n개월 / 유지 n개월)
+#
+# 2) 정책 국면 칼럼 구현
+# - 비교 대상: 기준금리 목표범위 상단
+#   * 2008-12-15 이전: DFEDTAR
+#   * 2008-12-16 이후: DFEDTARU
+# - 판정 기준:
+#   * 이번 기준시기 금리 > 직전 기준시기 금리 -> 긴축
+#   * 이번 기준시기 금리 < 직전 기준시기 금리 -> 완화
+#   * 같으면 유지
+# - 출력 위치를 위한 section-level payload 제공:
+#   * policy_phase_by_period = {period_key: "긴축/완화/유지"}
 
 from copy import deepcopy
 
@@ -15,17 +33,11 @@ from sqlalchemy import text
 from db import engine
 
 
-# -------------------------
-# RULE MAP
-# - 표시명 기준 계산 규칙
-# - CPI / PPI / 광공업생산 / 소매판매는 RAW level series이므로
-#   전기 대비 변동은 pct_change 기준으로 처리
-# -------------------------
 RULE_MAP = {
     "NFP": {
         "trend_unit": "개월",
-        "change_calc_type": "pct_change",
-        "speed_calc_type": "pct_change",
+        "change_calc_type": "diff",
+        "speed_calc_type": "diff",
     },
     "실업률": {
         "trend_unit": "개월",
@@ -119,6 +131,8 @@ FREQUENCY_LABEL_MAP = {
     "yearly": "연간",
 }
 
+POLICY_CUTOFF_DATE = pd.Timestamp("2008-12-16")
+
 
 # -------------------------
 # 기본 유틸
@@ -186,7 +200,6 @@ def format_period_key(ts, frequency):
     dt = pd.to_datetime(ts)
     freq = normalize_frequency(frequency)
 
-    # 내부 식별용 key는 유일해야 함
     if freq == "monthly":
         return dt.strftime("%Y%m")
     if freq == "weekly":
@@ -206,7 +219,6 @@ def format_period_label(ts, frequency):
     dt = pd.to_datetime(ts)
     freq = normalize_frequency(frequency)
 
-    # 화면 표시용 label
     if freq == "monthly":
         return dt.strftime("%Y%m")
     if freq == "weekly":
@@ -234,20 +246,12 @@ def format_value_for_table(value, series_code, unit, frequency):
     unit = clean_str(unit).lower()
     frequency = normalize_frequency(frequency)
 
-    # -------------------------
-    # 최소 예외 처리
-    # -------------------------
-    # PAYEMS: FRED unit = thousand_persons
     if series_code == "PAYEMS":
         return f"{value:,.0f}k"
 
-    # T10YIE: 소수 둘째 자리까지
     if series_code == "T10YIE":
         return f"{value:.2f}%"
 
-    # -------------------------
-    # 기본 포맷: unit 기준
-    # -------------------------
     if "%" in unit or "percent" in unit or "percentage" in unit:
         return f"{value:.1f}%"
 
@@ -263,14 +267,14 @@ def format_value_for_table(value, series_code, unit, frequency):
     return f"{value:,.1f}"
 
 
-def _ordered_numeric_values(value_map, period_keys):
+def _ordered_numeric_values_from_map(value_map, period_keys):
     values = []
 
     for key in period_keys:
-        value = value_map.get(key, "")
-        numeric = parse_display_value(value)
-        if numeric is not None:
-            values.append(numeric)
+        value = value_map.get(key)
+        if value is None or pd.isna(value):
+            continue
+        values.append(float(value))
 
     return values
 
@@ -318,6 +322,21 @@ def _format_change_value(change_value, change_calc_type):
     return ""
 
 
+def _classify_speed(delta_prev, delta_curr):
+    if delta_prev is None or delta_curr is None:
+        return ""
+
+    if abs(delta_curr - delta_prev) < 1e-12:
+        return "유지"
+
+    direction = "상승" if delta_curr > 0 else "하락"
+
+    if abs(delta_curr) > abs(delta_prev):
+        return f"{direction} 가속"
+
+    return f"{direction} 둔화"
+
+
 def _calc_speed_from_series(values, speed_calc_type):
     if len(values) < 3:
         return ""
@@ -325,57 +344,157 @@ def _calc_speed_from_series(values, speed_calc_type):
     delta_prev = _calc_change_value(values[-2], values[-3], speed_calc_type)
     delta_curr = _calc_change_value(values[-1], values[-2], speed_calc_type)
 
-    if delta_prev is None or delta_curr is None:
+    return _classify_speed(delta_prev, delta_curr)
+
+
+def _classify_direction(change_value, eps=1e-12):
+    if change_value is None:
         return ""
 
-    if abs(delta_curr - delta_prev) < 1e-12:
+    if abs(change_value) < eps:
         return "유지"
-
-    if delta_prev < delta_curr:
-        return "가속"
-
-    return "둔화"
+    if change_value > 0:
+        return "상승"
+    return "하락"
 
 
-def _build_speed_history(values, speed_calc_type):
+def _build_direction_history(values, change_calc_type):
     history = []
 
-    for idx in range(2, len(values)):
-        delta_prev = _calc_change_value(values[idx - 1], values[idx - 2], speed_calc_type)
-        delta_curr = _calc_change_value(values[idx], values[idx - 1], speed_calc_type)
-
-        if delta_prev is None or delta_curr is None:
-            history.append("")
-            continue
-
-        if abs(delta_curr - delta_prev) < 1e-12:
-            history.append("유지")
-        elif delta_prev < delta_curr:
-            history.append("가속")
-        else:
-            history.append("둔화")
+    for idx in range(1, len(values)):
+        change_value = _calc_change_value(
+            values[idx],
+            values[idx - 1],
+            change_calc_type,
+        )
+        history.append(_classify_direction(change_value))
 
     return history
 
 
-def _calc_trend_from_series(values, speed_calc_type, trend_unit):
-    history = _build_speed_history(values, speed_calc_type)
+def _calc_trend_from_series(values, change_calc_type, trend_unit):
+    history = _build_direction_history(values, change_calc_type)
 
     if not history:
         return ""
 
-    current_speed = history[-1]
-    if current_speed == "":
+    current_direction = history[-1]
+    if current_direction == "":
         return ""
 
     count = 1
-    for speed in reversed(history[:-1]):
-        if speed == current_speed:
+    for direction in reversed(history[:-1]):
+        if direction == current_direction:
             count += 1
         else:
             break
 
-    return f"{count}{trend_unit}"
+    return f"{current_direction} {count}{trend_unit}"
+
+
+# -------------------------
+# 정책 국면 함수
+# -------------------------
+def load_policy_target_upper_series(end_date=None):
+    if end_date is None:
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+
+    query = text("""
+        SELECT
+            m.series_code,
+            d.date_value,
+            d.value_num
+        FROM series_data d
+        JOIN series_meta m
+          ON d.series_id = m.series_id
+        WHERE m.series_code IN ('DFEDTAR', 'DFEDTARU')
+          AND d.date_value <= :end_date
+        ORDER BY d.date_value, m.series_code
+    """)
+
+    df = pd.read_sql(query, engine, params={"end_date": end_date})
+
+    if df.empty:
+        return pd.DataFrame(columns=["date_value", "target_upper"])
+
+    df["date_value"] = pd.to_datetime(df["date_value"])
+    df["value_num"] = pd.to_numeric(df["value_num"], errors="coerce")
+    df = df.dropna(subset=["value_num"]).sort_values(["date_value", "series_code"])
+
+    old_df = df[
+        (df["series_code"] == "DFEDTAR") &
+        (df["date_value"] < POLICY_CUTOFF_DATE)
+    ][["date_value", "value_num"]].copy()
+
+    new_df = df[
+        (df["series_code"] == "DFEDTARU") &
+        (df["date_value"] >= POLICY_CUTOFF_DATE)
+    ][["date_value", "value_num"]].copy()
+
+    merged = pd.concat([old_df, new_df], ignore_index=True)
+    merged = merged.drop_duplicates(subset=["date_value"], keep="last")
+    merged = merged.sort_values("date_value").reset_index(drop=True)
+    merged = merged.rename(columns={"value_num": "target_upper"})
+
+    return merged
+
+
+def _get_policy_target_asof(policy_df, ref_date):
+    if policy_df is None or policy_df.empty or ref_date is None:
+        return None
+
+    ref_ts = pd.to_datetime(ref_date)
+    temp = policy_df[policy_df["date_value"] <= ref_ts]
+
+    if temp.empty:
+        return None
+
+    return float(temp["target_upper"].iloc[-1])
+
+
+def _classify_policy_phase(previous_rate, current_rate):
+    if previous_rate is None or current_rate is None:
+        return ""
+
+    if current_rate > previous_rate:
+        return "긴축"
+    if current_rate < previous_rate:
+        return "완화"
+    return "유지"
+
+
+def build_policy_phase_by_period(period_dates, frequency, policy_df, country_code):
+    if clean_str(country_code).upper() != "US":
+        return {}
+
+    if policy_df is None or policy_df.empty:
+        return {}
+
+    if not period_dates:
+        return {}
+
+    freq = normalize_frequency(frequency)
+
+    # period_dates는 이미 해당 section의 기준시기 실제 날짜 리스트
+    # 각 기준시기 날짜를 직전 기준시기 날짜와 비교
+    policy_map = {}
+    ordered_dates = pd.to_datetime(pd.Series(period_dates)).sort_values().tolist()
+
+    for idx, curr_ref in enumerate(ordered_dates):
+        curr_key = format_period_key(curr_ref, freq)
+
+        if idx == 0:
+            policy_map[curr_key] = ""
+            continue
+
+        prev_ref = ordered_dates[idx - 1]
+
+        previous_rate = _get_policy_target_asof(policy_df, prev_ref)
+        current_rate = _get_policy_target_asof(policy_df, curr_ref)
+
+        policy_map[curr_key] = _classify_policy_phase(previous_rate, current_rate)
+
+    return policy_map
 
 
 def _enrich_indicator(item, period_keys):
@@ -390,7 +509,10 @@ def _enrich_indicator(item, period_keys):
         enriched["trend"] = ""
         return enriched
 
-    actual_values = _ordered_numeric_values(item["actual"], period_keys)
+    actual_values = _ordered_numeric_values_from_map(
+        item.get("actual_num", {}),
+        period_keys,
+    )
 
     if len(actual_values) >= 2:
         change_value = _calc_change_value(
@@ -401,11 +523,17 @@ def _enrich_indicator(item, period_keys):
     else:
         change_value = None
 
-    enriched["change_display"] = _format_change_value(change_value, rule["change_calc_type"])
-    enriched["speed"] = _calc_speed_from_series(actual_values, rule["speed_calc_type"])
-    enriched["trend"] = _calc_trend_from_series(
+    enriched["change_display"] = _format_change_value(
+        change_value,
+        rule["change_calc_type"],
+    )
+    enriched["speed"] = _calc_speed_from_series(
         actual_values,
         rule["speed_calc_type"],
+    )
+    enriched["trend"] = _calc_trend_from_series(
+        actual_values,
+        rule["change_calc_type"],
         rule["trend_unit"],
     )
 
@@ -500,6 +628,7 @@ def build_indicator_item(meta_row, section_keys, series_df):
     series_code = clean_str(meta_row.get("series_code"))
 
     actual_map = {key: "" for key in section_keys}
+    actual_num_map = {key: None for key in section_keys}
     series_rows = []
 
     if not series_df.empty:
@@ -507,6 +636,7 @@ def build_indicator_item(meta_row, section_keys, series_df):
             key = format_period_key(row["date_value"], frequency)
             value_num = float(row["value_num"])
 
+            actual_num_map[key] = value_num
             actual_map[key] = format_value_for_table(
                 value=value_num,
                 series_code=series_code,
@@ -521,7 +651,6 @@ def build_indicator_item(meta_row, section_keys, series_df):
                 }
             )
 
-        # 현재 구조상 release_date는 실제 발표일이 아니라 마지막 관측일
         release_date = format_chart_date(series_df["date_value"].max())
     else:
         release_date = ""
@@ -531,10 +660,9 @@ def build_indicator_item(meta_row, section_keys, series_df):
         "indicator": display_name,
         "category": clean_str(meta_row.get("macro_category")),
         "release_date": release_date,
-        "policy_phase": "유지",
-        "policy_phase_base": "현재",
         "asset_moves": {"stock": "", "bond": "", "fx": ""},
         "actual": actual_map,
+        "actual_num": actual_num_map,
         "series": series_rows,
         "frequency": frequency,
         "unit": unit,
@@ -543,7 +671,7 @@ def build_indicator_item(meta_row, section_keys, series_df):
     return _enrich_indicator(item, section_keys)
 
 
-def build_section_payload(meta_df, data_df, frequency):
+def build_section_payload(meta_df, data_df, frequency, policy_df=None):
     section_meta = meta_df[meta_df["frequency"] == frequency].copy()
 
     if section_meta.empty:
@@ -553,6 +681,7 @@ def build_section_payload(meta_df, data_df, frequency):
     section_data = data_df[data_df["series_code"].isin(section_codes)].copy()
 
     if section_data.empty:
+        period_dates = []
         period_keys = []
         period_labels = []
     else:
@@ -574,11 +703,23 @@ def build_section_payload(meta_df, data_df, frequency):
         item = build_indicator_item(meta_row, period_keys, series_df)
         indicators.append(item)
 
+    country_code = ""
+    if not section_meta.empty:
+        country_code = clean_str(section_meta.iloc[0].get("country_code"))
+
+    policy_phase_by_period = build_policy_phase_by_period(
+        period_dates=period_dates,
+        frequency=frequency,
+        policy_df=policy_df,
+        country_code=country_code,
+    )
+
     return {
         "frequency": frequency,
         "frequency_label": FREQUENCY_LABEL_MAP.get(frequency, frequency),
         "period_keys": period_keys,
         "period_labels": period_labels,
+        "policy_phase_by_period": policy_phase_by_period,
         "indicators": indicators,
     }
 
@@ -611,11 +752,20 @@ def get_macro_tracker_payload(country="US", category="ALL", start_date="1970-01-
             "sections": [],
         }
 
+    policy_df = pd.DataFrame(columns=["date_value", "target_upper"])
+    if clean_str(country).upper() == "US":
+        policy_df = load_policy_target_upper_series(end_date=end_date)
+
     ordered_frequencies = ["monthly", "weekly", "daily", "quarterly", "yearly"]
     sections = []
 
     for frequency in ordered_frequencies:
-        section = build_section_payload(meta_df, data_df, frequency)
+        section = build_section_payload(
+            meta_df=meta_df,
+            data_df=data_df,
+            frequency=frequency,
+            policy_df=policy_df,
+        )
         if section is not None and section["indicators"]:
             sections.append(section)
 

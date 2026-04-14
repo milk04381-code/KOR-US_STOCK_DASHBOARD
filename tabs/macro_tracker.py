@@ -7,6 +7,11 @@ Created on Wed Apr  8 13:27:30 2026
 
 # tabs/macro_tracker.py
 # 수정본
+# 반영 사항:
+# 1) 좌측 고정 테이블의 '연준 통화정책 국면' 단일 컬럼 제거
+# 2) 가운데 시계열 헤더 1행에 기준시기별 정책 국면 표시
+# 3) 헤더 2행은 기준시기(YYYYMM / YYMMDD / YYQn 등) 유지
+# 4) 기존 레이아웃 구조는 최대한 유지
 
 
 from datetime import date
@@ -73,13 +78,12 @@ INVESTING_EMBED_HTML = """
 # -------------------------
 W_SELECT = 44
 W_NAME = 120
-W_POLICY = 88
 
 W_TIME = 72
 
 W_CHANGE = 78
-W_SPEED = 54
-W_TREND = 58
+W_SPEED = 74
+W_TREND = 86
 W_RELEASE = 82
 W_ASSET = 66
 
@@ -160,7 +164,7 @@ def _checkbox_control(series_code, selected_series_codes):
 # 좌/중/우 패널 빌더
 # -------------------------
 def _build_left_table(indicators, selected_series_codes):
-    total_width = W_SELECT + W_NAME + W_POLICY
+    total_width = W_SELECT + W_NAME
 
     table = html.Table(
         [
@@ -170,14 +174,9 @@ def _build_left_table(indicators, selected_series_codes):
                         [
                             html.Th("선택", rowSpan=2, style=_head_style(W_SELECT)),
                             html.Th("지표명", rowSpan=2, style=_head_style(W_NAME, align="left")),
-                            html.Th("연준 통화정책 국면", style=_head_style(W_POLICY)),
                         ]
                     ),
-                    html.Tr(
-                        [
-                            html.Th("기준시기", style=_head_style(W_POLICY)),
-                        ]
-                    ),
+                    html.Tr([]),
                 ]
             ),
             html.Tbody(
@@ -191,11 +190,6 @@ def _build_left_table(indicators, selected_series_codes):
                             html.Td(
                                 item["indicator"],
                                 style=_cell_style(W_NAME, align="left", bold=True),
-                            ),
-                            html.Td(
-                                item.get("policy_phase", "유지"),
-                                style=_cell_style(W_POLICY, align="left"),
-                                title=item.get("policy_phase_base", "현재"),
                             ),
                         ]
                     )
@@ -212,13 +206,18 @@ def _build_left_table(indicators, selected_series_codes):
     return table
 
 
-def _build_middle_table(period_keys, period_labels, indicators, frequency):
+def _build_middle_table(period_keys, period_labels, indicators, frequency, policy_phase_by_period=None):
     total_width = len(period_keys) * W_TIME
+    policy_phase_by_period = policy_phase_by_period or {}
 
     header_row_1 = html.Tr(
         [
-            html.Th("", style=_head_style(W_TIME))
-            for _ in period_keys
+            html.Th(
+                policy_phase_by_period.get(key, ""),
+                style=_head_style(W_TIME),
+                title=policy_phase_by_period.get(key, ""),
+            )
+            for key in period_keys
         ]
     )
 
@@ -326,6 +325,7 @@ def _build_one_frequency_table(section, selected_series_codes):
     period_keys = section["period_keys"]
     period_labels = section.get("period_labels", period_keys)
     indicators = section["indicators"]
+    policy_phase_by_period = section.get("policy_phase_by_period", {})
 
     if not indicators:
         return html.Div(
@@ -334,10 +334,16 @@ def _build_one_frequency_table(section, selected_series_codes):
         )
 
     left_table = _build_left_table(indicators, selected_series_codes)
-    middle_table = _build_middle_table(period_keys, period_labels, indicators, frequency)
+    middle_table = _build_middle_table(
+        period_keys,
+        period_labels,
+        indicators,
+        frequency,
+        policy_phase_by_period=policy_phase_by_period,
+    )
     right_table = _build_right_table(indicators)
 
-    left_width = W_SELECT + W_NAME + W_POLICY
+    left_width = W_SELECT + W_NAME
     right_width = W_CHANGE + W_SPEED + W_TREND + W_RELEASE + (W_ASSET * 3)
 
     return html.Div(
