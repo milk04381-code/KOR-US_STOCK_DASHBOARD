@@ -5,19 +5,19 @@ Created on Wed Apr  8 13:27:30 2026
 @author: 박승욱
 """
 
-
 # tabs/macro_tracker.py
 # 수정본
 # 반영 사항:
 # 1) 가운데 시계열 헤더 1행 왼쪽에 '연준의 통화정책 국면' 라벨 복구
 # 2) 가운데 시계열 헤더 2행 왼쪽에 '기준시기' 라벨 복구
 # 3) 스크롤 기본 위치를 오른쪽 끝으로 다시 보정
-# 4) 선택/지표명 헤더를 rowSpan=2 단일 셀로 복구
+# 4) 선택/지표명 헤더를 1행 구조(rowSpan=2)로 복구
 # 5) 전기 대비 변동 헤더 줄바꿈 허용
 # 6) 체크박스 선택 시 우측 차트 즉시 반응하도록 보강
 # 7) 기존 레이아웃 구조는 최대한 유지
 
 from datetime import date
+import time
 
 from dash import dcc, html, Input, Output, State, ALL
 import plotly.graph_objs as go
@@ -600,12 +600,18 @@ def register_callbacks(app):
             if (!trigger_value) {
                 return "";
             }
-            setTimeout(function() {
+
+            const applyScrollRight = function() {
                 const nodes = document.querySelectorAll('.macro-middle-scroll');
                 nodes.forEach(function(node) {
-                    node.scrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
+                    node.scrollLeft = node.scrollWidth;
                 });
-            }, 120);
+            };
+
+            setTimeout(applyScrollRight, 0);
+            setTimeout(applyScrollRight, 120);
+            setTimeout(applyScrollRight, 300);
+
             return "done";
         }
         """,
@@ -649,7 +655,7 @@ def register_callbacks(app):
             "category": category,
             "start_date": start_date,
             "end_date": end_date,
-            "ts": date.today().isoformat(),
+            "ts": time.time(),
         }
 
         return _build_tables(payload, selected_series_codes=filtered_selected), trigger_value
@@ -670,7 +676,6 @@ def register_callbacks(app):
 
     @app.callback(
         Output("macro-main-chart", "figure"),
-        Input("macro-selected-series-codes", "data"),
         Input({"type": "macro-checklist", "index": ALL}, "value"),
         Input({"type": "macro-checklist", "index": ALL}, "id"),
         Input("macro-country-dropdown", "value"),
@@ -680,7 +685,6 @@ def register_callbacks(app):
         Input("macro-recession-check", "value"),
     )
     def update_macro_chart(
-        selected_series_codes_store,
         check_values,
         check_ids,
         country,
@@ -706,13 +710,10 @@ def register_callbacks(app):
             for item in section.get("indicators", []):
                 valid_codes.add(item["series_code"])
 
-        selected_from_checks = []
+        selected_series_codes = []
         for values, comp_id in zip(check_values, check_ids):
-            if values and comp_id["index"] in values:
-                selected_from_checks.append(comp_id["index"])
-
-        selected_series_codes = selected_from_checks or (selected_series_codes_store or [])
-        selected_series_codes = [x for x in selected_series_codes if x in valid_codes]
+            if values and comp_id["index"] in values and comp_id["index"] in valid_codes:
+                selected_series_codes.append(comp_id["index"])
 
         if not selected_series_codes:
             fig = go.Figure()
