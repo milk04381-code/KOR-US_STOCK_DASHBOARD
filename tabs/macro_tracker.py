@@ -23,7 +23,7 @@ import os
 from dash import dcc, html, Input, Output, State, ALL
 import plotly.graph_objs as go
 
-from services.macro_tracker_service import get_macro_tracker_payload
+from services.macro_tracker_service import get_macro_tracker_payload, cached_macro_payload
 from services.data_service import load_chart_dataset
 from services.chart_service import build_main_figure
 
@@ -711,11 +711,11 @@ def register_callbacks(app):
         if end_date is None:
             end_date = date.today().isoformat()
 
-        payload = get_macro_tracker_payload(
-            country=country,
-            category=category,
-            start_date=start_date,
-            end_date=end_date,
+        payload = cached_macro_payload(
+            country,
+            category,
+            start_date,
+            end_date,
         )
         selected_series_codes = selected_series_codes or []
 
@@ -758,18 +758,14 @@ def register_callbacks(app):
         return selected
     
     @app.callback(
-    Output("macro-main-chart", "figure"),
-    Input("macro-selected-series-codes", "data"),
-    Input("macro-country-dropdown", "value"),
-    Input("macro-category-dropdown", "value"),
-    Input("macro-start-date", "date"),
-    Input("macro-end-date", "date"),
-    Input("macro-recession-check", "value"),
+        Output("macro-main-chart", "figure"),
+        Input("macro-selected-series-codes", "data"),
+        Input("macro-start-date", "date"),
+        Input("macro-end-date", "date"),
+        Input("macro-recession-check", "value"),
     )
     def update_macro_chart(
         selected_series_codes,
-        country,
-        category,
         start_date,
         end_date,
         recession_value,
@@ -779,39 +775,9 @@ def register_callbacks(app):
         if end_date is None:
             end_date = date.today().isoformat()
     
-        macro_debug(
-            "update_macro_chart:start",
-            "selected_series_codes=", selected_series_codes,
-            "country=", country,
-            "category=", category,
-            "start_date=", start_date,
-            "end_date=", end_date,
-            "recession_value=", recession_value,
-        )
-    
-        payload = get_macro_tracker_payload(
-            country=country,
-            category=category,
-            start_date=start_date,
-            end_date=end_date,
-        )
-    
-        valid_codes = set()
-        for section in payload.get("sections", []):
-            for item in section.get("indicators", []):
-                valid_codes.add(item["series_code"])
-    
         selected_series_codes = selected_series_codes or []
-        filtered_selected = [code for code in selected_series_codes if code in valid_codes]
     
-        macro_debug(
-            "update_macro_chart:valid_filter",
-            "valid_codes_count=", len(valid_codes),
-            "filtered_selected=", filtered_selected,
-        )
-    
-        if not filtered_selected:
-            macro_debug("update_macro_chart:no_selection")
+        if not selected_series_codes:
             fig = go.Figure()
             fig.update_layout(
                 template="plotly_white",
@@ -821,29 +787,13 @@ def register_callbacks(app):
             return fig
     
         dataset = load_chart_dataset(
-            selected_codes=filtered_selected,
+            selected_codes=selected_series_codes,
             start_date=start_date,
             end_date=end_date,
             axis_override_map=None,
         )
     
-        if dataset is None:
-            macro_debug("update_macro_chart:dataset is None")
-        else:
-            macro_debug(
-                "update_macro_chart:dataset loaded",
-                "rows=", len(dataset),
-                "columns=", list(dataset.columns),
-            )
-            if not dataset.empty:
-                try:
-                    debug_unique = dataset["series_code"].dropna().unique().tolist()
-                except Exception:
-                    debug_unique = []
-                macro_debug("update_macro_chart:dataset unique series_code=", debug_unique)
-    
         if dataset is None or dataset.empty:
-            macro_debug("update_macro_chart:dataset empty")
             fig = go.Figure()
             fig.update_layout(
                 template="plotly_white",
@@ -859,10 +809,7 @@ def register_callbacks(app):
             show_recession=("show" in (recession_value or [])),
         )
     
-        macro_debug("update_macro_chart:figure built")
-    
         fig.update_layout(
             title=f"선택 지표 시계열 ({start_date} ~ {end_date})",
         )
         return fig
-    

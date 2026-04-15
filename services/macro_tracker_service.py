@@ -24,8 +24,15 @@ Created on Wed Apr  8 18:13:41 2026
 #   * 같으면 유지
 # - 출력 위치를 위한 section-level payload 제공:
 #   * policy_phase_by_period = {period_key: "긴축/완화/유지"}
+#
+# 3) 성능 개선
+# - cached_macro_payload() 추가
+# - include_policy_phase 옵션 추가
+#   * 표 렌더 시 True
+#   * 차트 등 경량 호출 시 False 가능
 
 from copy import deepcopy
+from functools import lru_cache
 
 import pandas as pd
 from sqlalchemy import text
@@ -289,7 +296,6 @@ def _format_change_value(change_value, change_calc_type, series_code="", unit=""
         return f"{change_value:+.1f}%"
 
     if change_calc_type == "diff":
-        # 단위 기준 + 최소 예외
         if series_code == "PAYEMS":
             return f"{change_value:+,.1f}k"
 
@@ -317,7 +323,6 @@ def _classify_speed(delta_prev, delta_curr):
     if abs(delta_curr - delta_prev) < EPS:
         return "유지"
 
-    # 방향 전환
     if delta_prev < -EPS and delta_curr > EPS:
         return "상승 전환"
     if delta_prev > EPS and delta_curr < -EPS:
@@ -327,7 +332,6 @@ def _classify_speed(delta_prev, delta_curr):
     if abs(delta_prev) <= EPS and delta_curr < -EPS:
         return "하락 전환"
 
-    # current가 0이면 직전 방향의 둔화로 해석
     if abs(delta_curr) <= EPS:
         if delta_prev > EPS:
             return "상승 둔화"
@@ -450,7 +454,7 @@ def _get_policy_target_asof(policy_df, ref_date):
         return None
 
     ref_ts = pd.to_datetime(ref_date)
-    temp = policy_df[policy_df["date_value"] <= ref_ts]
+    temp = policy_df.loc[policy_df["date_value"] <= ref_ts]
 
     if temp.empty:
         return None
@@ -675,7 +679,13 @@ def build_indicator_item(meta_row, section_keys, series_df):
     return _enrich_indicator(item, section_keys)
 
 
-def build_section_payload(meta_df, data_df, frequency, policy_df=None):
+def build_section_payload(
+    meta_df,
+    data_df,
+    frequency,
+    policy_df=None,
+    include_policy_phase=True,
+):
     section_meta = meta_df[meta_df["frequency"] == frequency].copy()
 
     if section_meta.empty:
@@ -711,12 +721,15 @@ def build_section_payload(meta_df, data_df, frequency, policy_df=None):
     if not section_meta.empty:
         country_code = clean_str(section_meta.iloc[0].get("country_code"))
 
-    policy_phase_by_period = build_policy_phase_by_period(
-        period_dates=period_dates,
-        frequency=frequency,
-        policy_df=policy_df,
-        country_code=country_code,
-    )
+    if include_policy_phase:
+        policy_phase_by_period = build_policy_phase_by_period(
+            period_dates=period_dates,
+            frequency=frequency,
+            policy_df=policy_df,
+            country_code=country_code,
+        )
+    else:
+        policy_phase_by_period = {}
 
     return {
         "frequency": frequency,
@@ -731,7 +744,24 @@ def build_section_payload(meta_df, data_df, frequency, policy_df=None):
 # -------------------------
 # 외부 제공 함수
 # -------------------------
-def get_macro_tracker_payload(country="US", category="ALL", start_date="1970-01-01", end_date=None):
+@lru_cache(maxsize=32)
+def cached_macro_payload(country, category, start_date, end_date):
+    return get_macro_tracker_payload(
+        country=country,
+        category=category,
+        start_date=start_date,
+        end_date=end_date,
+        include_policy_phase=True,
+    )
+
+
+def get_macro_tracker_payload(
+    country="US",
+    category="ALL",
+    start_date="1970-01-01",
+    end_date=None,
+    include_policy_phase=True,
+):
     if end_date is None:
         end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
 
@@ -757,7 +787,7 @@ def get_macro_tracker_payload(country="US", category="ALL", start_date="1970-01-
         }
 
     policy_df = pd.DataFrame(columns=["date_value", "target_upper"])
-    if clean_str(country).upper() == "US":
+    if include_policy_phase and clean_str(country).upper() == "US":
         policy_df = load_policy_target_upper_series(end_date=end_date)
 
     ordered_frequencies = ["monthly", "weekly", "daily", "quarterly", "yearly"]
@@ -769,6 +799,7 @@ def get_macro_tracker_payload(country="US", category="ALL", start_date="1970-01-
             data_df=data_df,
             frequency=frequency,
             policy_df=policy_df,
+            include_policy_phase=include_policy_phase,
         )
         if section is not None and section["indicators"]:
             sections.append(section)
