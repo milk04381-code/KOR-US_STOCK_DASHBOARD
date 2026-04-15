@@ -49,7 +49,7 @@ INVESTING_EMBED_HTML = """
     <title>Investing Economic Calendar</title>
     <style>
         body { margin: 0; padding: 0; background: white; }
-        .wrap { width: 650px; margin: 0 auto; background: white; }
+        .wrap { width: 100%; margin: 0 auto; background: white; }
         .poweredBy { font-family: Arial, Helvetica, sans-serif; }
         .underline_link { font-size: 11px; color: #06529D; font-weight: bold; }
     </style>
@@ -57,7 +57,7 @@ INVESTING_EMBED_HTML = """
 <body>
     <div class="wrap">
         <iframe src="https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone,timeselector,filters&countries=11,5&calType=week&timeZone=8&lang=1"
-                width="650"
+                width="100%"
                 height="467"
                 frameborder="0"
                 allowtransparency="true"
@@ -71,6 +71,27 @@ INVESTING_EMBED_HTML = """
                    class="underline_link">Investing.com</a>.
             </span>
         </div>
+    </div>
+</body>
+</html>
+"""
+
+TECHNICAL_CHART_EMBED_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Investing Technical Chart</title>
+    <style>
+        body { margin: 0; padding: 0; background: white; }
+        .wrap { width: 100%; margin: 0 auto; background: white; }
+        iframe { width: 100%; border: 0; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <iframe height="480"
+                src="https://ssltvc.investing.com/?pair_ID=166&height=480&width=650&interval=86400&plotStyle=candles&domain_ID=1&lang_ID=1&timezone_ID=7"></iframe>
     </div>
 </body>
 </html>
@@ -153,6 +174,17 @@ def _head_style(
     return style
 
 
+def _merged_head_style(width=None, bg="#f2f2f2", align="center", nowrap=True, overflow_hidden=True):
+    return _head_style(
+        width=width,
+        bg=bg,
+        align=align,
+        height=HEAD_HEIGHT * 2,
+        nowrap=nowrap,
+        overflow_hidden=overflow_hidden,
+    )
+
+
 def _table_base_style():
     return {
         "borderCollapse": "collapse",
@@ -184,8 +216,8 @@ def _build_left_table(indicators, selected_series_codes):
                 [
                     html.Tr(
                         [
-                            html.Th("선택", rowSpan=2, style=_head_style(W_SELECT)),
-                            html.Th("지표명", rowSpan=2, style=_head_style(W_NAME, align="left")),
+                            html.Th("선택", rowSpan=2, style=_merged_head_style(W_SELECT)),
+                            html.Th("지표명", rowSpan=2, style=_merged_head_style(W_NAME, align="center")),
                         ]
                     ),
                     html.Tr([]),
@@ -299,15 +331,15 @@ def _build_right_table(indicators):
                             html.Th(
                                 "전기 대비 변동",
                                 rowSpan=2,
-                                style=_head_style(
+                                style=_merged_head_style(
                                     W_CHANGE,
                                     nowrap=False,
                                     overflow_hidden=False,
                                 ),
                             ),
-                            html.Th("속도", rowSpan=2, style=_head_style(W_SPEED)),
-                            html.Th("추세", rowSpan=2, style=_head_style(W_TREND)),
-                            html.Th("발표일", rowSpan=2, style=_head_style(W_RELEASE)),
+                            html.Th("속도", rowSpan=2, style=_merged_head_style(W_SPEED)),
+                            html.Th("추세", rowSpan=2, style=_merged_head_style(W_TREND)),
+                            html.Th("발표일", rowSpan=2, style=_merged_head_style(W_RELEASE)),
                             html.Th("자산군별 일중 변동", colSpan=3, style=_head_style(W_ASSET * 3)),
                         ]
                     ),
@@ -435,7 +467,7 @@ def _build_tables(payload, selected_series_codes):
     )
 
 
-def _build_investing_iframe_block():
+def _build_economic_calendar_block():
     return html.Div(
         [
             html.H3("Economic Calendar (Investing)", style={"marginBottom": "8px"}),
@@ -453,7 +485,44 @@ def _build_investing_iframe_block():
                 },
             ),
         ],
-        style={"marginTop": "20px", "paddingTop": "8px"},
+        style={"flex": "1 1 0", "minWidth": "0", "paddingTop": "8px"},
+    )
+
+
+def _build_technical_chart_block():
+    return html.Div(
+        [
+            html.H3("Technical Charts (Investing)", style={"marginBottom": "8px"}),
+            html.Div(
+                "미국 주식 대표 지수 기술적 차트를 하단 위젯에서 바로 확인합니다.",
+                style={"fontSize": "14px", "color": "#666", "marginBottom": "12px"},
+            ),
+            html.Iframe(
+                srcDoc=TECHNICAL_CHART_EMBED_HTML,
+                style={
+                    "width": "100%",
+                    "height": "560px",
+                    "border": "1px solid #ddd",
+                    "backgroundColor": "white",
+                },
+            ),
+        ],
+        style={"flex": "1 1 0", "minWidth": "0", "paddingTop": "8px"},
+    )
+
+
+def _build_bottom_widget_row():
+    return html.Div(
+        [
+            _build_economic_calendar_block(),
+            _build_technical_chart_block(),
+        ],
+        style={
+            "display": "flex",
+            "gap": "16px",
+            "marginTop": "20px",
+            "alignItems": "flex-start",
+        },
     )
 
 
@@ -585,7 +654,7 @@ def get_layout():
                             ),
                         ]
                     ),
-                    _build_investing_iframe_block(),
+                    _build_bottom_widget_row(),
                 ],
                 style={"width": "88%", "margin": "24px auto", "backgroundColor": "white"},
             )
@@ -676,8 +745,7 @@ def register_callbacks(app):
 
     @app.callback(
         Output("macro-main-chart", "figure"),
-        Input({"type": "macro-checklist", "index": ALL}, "value"),
-        Input({"type": "macro-checklist", "index": ALL}, "id"),
+        Input("macro-selected-series-codes", "data"),
         Input("macro-country-dropdown", "value"),
         Input("macro-category-dropdown", "value"),
         Input("macro-start-date", "date"),
@@ -685,8 +753,7 @@ def register_callbacks(app):
         Input("macro-recession-check", "value"),
     )
     def update_macro_chart(
-        check_values,
-        check_ids,
+        selected_series_codes,
         country,
         category,
         start_date,
@@ -710,12 +777,10 @@ def register_callbacks(app):
             for item in section.get("indicators", []):
                 valid_codes.add(item["series_code"])
 
-        selected_series_codes = []
-        for values, comp_id in zip(check_values, check_ids):
-            if values and comp_id["index"] in values and comp_id["index"] in valid_codes:
-                selected_series_codes.append(comp_id["index"])
+        selected_series_codes = selected_series_codes or []
+        filtered_selected = [code for code in selected_series_codes if code in valid_codes]
 
-        if not selected_series_codes:
+        if not filtered_selected:
             fig = go.Figure()
             fig.update_layout(
                 template="plotly_white",
@@ -725,7 +790,7 @@ def register_callbacks(app):
             return fig
 
         dataset = load_chart_dataset(
-            selected_codes=selected_series_codes,
+            selected_codes=filtered_selected,
             start_date=start_date,
             end_date=end_date,
             axis_override_map=None,
