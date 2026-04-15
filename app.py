@@ -5,7 +5,6 @@ Created on Thu Mar 19 16:03:16 2026
 @author: 박승욱
 """
 
-import os
 
 from dash import Dash, dcc, html
 
@@ -34,21 +33,9 @@ app.title = "국내/미국 주식 Dashboard"
 series_options = load_series_dropdown_options()
 default_value = get_default_series_selection(default_codes=["KOSPI"], fallback_count=2)
 
-deploy_branch = os.getenv("RENDER_GIT_BRANCH", "local")
-deploy_commit = os.getenv("RENDER_GIT_COMMIT", "local")
-deploy_service = os.getenv("RENDER_SERVICE_NAME", "local-service")
-
 app.layout = html.Div(
     [
         html.H2("국내/미국 주식 Dashboard"),
-        html.Div(
-            f"deploy service: {deploy_service} | branch: {deploy_branch} | commit: {deploy_commit}",
-            style={
-                "fontSize": "12px",
-                "color": "#666",
-                "marginBottom": "10px",
-            },
-        ),
         dcc.Tabs(
             [
                 get_domestic_monitor_layout(series_options, default_value),
