@@ -18,6 +18,7 @@ Created on Wed Apr  8 13:27:30 2026
 
 from datetime import date
 import time
+import os
 
 from dash import dcc, html, Input, Output, State, ALL
 import plotly.graph_objs as go
@@ -116,6 +117,12 @@ ROW_HEIGHT = 38
 HEAD_HEIGHT = 34
 
 BORDER = "1px solid #333"
+
+DEBUG_MACRO = os.getenv("DEBUG_MACRO", "1") == "1"
+
+def macro_debug(*args):
+    if DEBUG_MACRO:
+        print("[macro_debug]", *args, flush=True)
 
 
 # -------------------------
@@ -730,27 +737,34 @@ def register_callbacks(app):
         return _build_tables(payload, selected_series_codes=filtered_selected), trigger_value
 
     @app.callback(
-        Output("macro-selected-series-codes", "data"),
-        Input({"type": "macro-checklist", "index": ALL}, "value"),
-        Input({"type": "macro-checklist", "index": ALL}, "id"),
+    Output("macro-selected-series-codes", "data"),
+    Input({"type": "macro-checklist", "index": ALL}, "value"),
+    Input({"type": "macro-checklist", "index": ALL}, "id"),
     )
     def update_selected_series_codes(check_values, check_ids):
         selected = []
-
+    
         for values, comp_id in zip(check_values, check_ids):
             if values and comp_id["index"] in values:
                 selected.append(comp_id["index"])
-
+    
+        macro_debug(
+            "update_selected_series_codes",
+            "check_values=", check_values,
+            "check_ids=", check_ids,
+            "selected=", selected,
+        )
+    
         return selected
-
+    
     @app.callback(
-        Output("macro-main-chart", "figure"),
-        Input("macro-selected-series-codes", "data"),
-        Input("macro-country-dropdown", "value"),
-        Input("macro-category-dropdown", "value"),
-        Input("macro-start-date", "date"),
-        Input("macro-end-date", "date"),
-        Input("macro-recession-check", "value"),
+    Output("macro-main-chart", "figure"),
+    Input("macro-selected-series-codes", "data"),
+    Input("macro-country-dropdown", "value"),
+    Input("macro-category-dropdown", "value"),
+    Input("macro-start-date", "date"),
+    Input("macro-end-date", "date"),
+    Input("macro-recession-check", "value"),
     )
     def update_macro_chart(
         selected_series_codes,
@@ -764,23 +778,40 @@ def register_callbacks(app):
             start_date = "1970-01-01"
         if end_date is None:
             end_date = date.today().isoformat()
-
+    
+        macro_debug(
+            "update_macro_chart:start",
+            "selected_series_codes=", selected_series_codes,
+            "country=", country,
+            "category=", category,
+            "start_date=", start_date,
+            "end_date=", end_date,
+            "recession_value=", recession_value,
+        )
+    
         payload = get_macro_tracker_payload(
             country=country,
             category=category,
             start_date=start_date,
             end_date=end_date,
         )
-
+    
         valid_codes = set()
         for section in payload.get("sections", []):
             for item in section.get("indicators", []):
                 valid_codes.add(item["series_code"])
-
+    
         selected_series_codes = selected_series_codes or []
         filtered_selected = [code for code in selected_series_codes if code in valid_codes]
-
+    
+        macro_debug(
+            "update_macro_chart:valid_filter",
+            "valid_codes_count=", len(valid_codes),
+            "filtered_selected=", filtered_selected,
+        )
+    
         if not filtered_selected:
+            macro_debug("update_macro_chart:no_selection")
             fig = go.Figure()
             fig.update_layout(
                 template="plotly_white",
@@ -788,15 +819,31 @@ def register_callbacks(app):
                 margin={"l": 40, "r": 20, "t": 60, "b": 40},
             )
             return fig
-
+    
         dataset = load_chart_dataset(
             selected_codes=filtered_selected,
             start_date=start_date,
             end_date=end_date,
             axis_override_map=None,
         )
-
+    
+        if dataset is None:
+            macro_debug("update_macro_chart:dataset is None")
+        else:
+            macro_debug(
+                "update_macro_chart:dataset loaded",
+                "rows=", len(dataset),
+                "columns=", list(dataset.columns),
+            )
+            if not dataset.empty:
+                try:
+                    debug_unique = dataset["series_code"].dropna().unique().tolist()
+                except Exception:
+                    debug_unique = []
+                macro_debug("update_macro_chart:dataset unique series_code=", debug_unique)
+    
         if dataset is None or dataset.empty:
+            macro_debug("update_macro_chart:dataset empty")
             fig = go.Figure()
             fig.update_layout(
                 template="plotly_white",
@@ -804,15 +851,18 @@ def register_callbacks(app):
                 margin={"l": 40, "r": 20, "t": 60, "b": 40},
             )
             return fig
-
+    
         fig = build_main_figure(
             dataset=dataset,
             start_date=start_date,
             end_date=end_date,
             show_recession=("show" in (recession_value or [])),
         )
-
+    
+        macro_debug("update_macro_chart:figure built")
+    
         fig.update_layout(
             title=f"선택 지표 시계열 ({start_date} ~ {end_date})",
         )
         return fig
+    
