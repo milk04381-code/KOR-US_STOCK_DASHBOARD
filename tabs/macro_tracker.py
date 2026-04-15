@@ -16,6 +16,7 @@ Created on Wed Apr  8 13:27:30 2026
 # 6) 체크박스 선택 시 우측 차트 즉시 반응하도록 보강
 # 7) 기존 레이아웃 구조는 최대한 유지
 # 8) 서버 로그용 debug 코드 제거
+# 9) 경제지표 Tracker 차트에 축 선택 UI 추가
 
 from datetime import date
 import time
@@ -644,6 +645,19 @@ def get_layout():
                                         options=[{"label": "Recession 음영 표시", "value": "show"}],
                                         value=["show"],
                                     ),
+                                    html.Div(
+                                        [
+                                            html.Label("축 선택"),
+                                            html.Div(
+                                                id="macro-axis-selector-container",
+                                                style={
+                                                    "marginTop": "8px",
+                                                    "marginBottom": "12px",
+                                                },
+                                            ),
+                                        ],
+                                        style={"marginTop": "10px"},
+                                    ),
                                     dcc.Graph(id="macro-main-chart", style={"height": "760px"}),
                                 ],
                                 style={
@@ -745,17 +759,67 @@ def register_callbacks(app):
         return selected
 
     @app.callback(
+        Output("macro-axis-selector-container", "children"),
+        Input("macro-selected-series-codes", "data"),
+    )
+    def update_macro_axis_selector(selected_codes):
+        selected_codes = selected_codes or []
+
+        if not selected_codes:
+            return html.Div("선택된 지표가 없습니다.", style={"color": "#666"})
+
+        rows = []
+
+        for code in selected_codes:
+            rows.append(
+                html.Div(
+                    [
+                        html.Span(
+                            code,
+                            style={
+                                "display": "inline-block",
+                                "width": "140px",
+                                "fontWeight": "bold",
+                            },
+                        ),
+                        dcc.Dropdown(
+                            id={"type": "macro-axis-dropdown", "index": code},
+                            options=[
+                                {"label": "자동", "value": ""},
+                                {"label": "왼쪽 축", "value": "left"},
+                                {"label": "오른쪽 축", "value": "right"},
+                            ],
+                            value="",
+                            clearable=False,
+                            style={
+                                "width": "160px",
+                                "display": "inline-block",
+                                "verticalAlign": "middle",
+                            },
+                        ),
+                    ],
+                    style={"marginBottom": "6px"},
+                )
+            )
+
+        return rows
+
+    @app.callback(
         Output("macro-main-chart", "figure"),
         Input("macro-selected-series-codes", "data"),
         Input("macro-start-date", "date"),
         Input("macro-end-date", "date"),
         Input("macro-recession-check", "value"),
+        Input({"type": "macro-axis-dropdown", "index": ALL}, "value"),
+        Input({"type": "macro-axis-dropdown", "index": ALL}, "id"),
     )
     def update_macro_chart(
         selected_series_codes,
         start_date,
         end_date,
         recession_value,
+        axis_values,
+        axis_ids,
     ):
         if start_date is None:
             start_date = "1970-01-01"
@@ -773,11 +837,16 @@ def register_callbacks(app):
             )
             return fig
 
+        axis_override_map = {}
+        for axis_value, axis_id in zip(axis_values, axis_ids):
+            if axis_value in ("left", "right"):
+                axis_override_map[axis_id["index"]] = axis_value
+
         dataset = load_chart_dataset(
             selected_codes=selected_series_codes,
             start_date=start_date,
             end_date=end_date,
-            axis_override_map=None,
+            axis_override_map=axis_override_map,
         )
 
         if dataset is None or dataset.empty:
