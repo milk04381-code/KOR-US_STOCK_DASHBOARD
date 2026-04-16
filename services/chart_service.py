@@ -6,15 +6,6 @@ Created on Tue Mar 24 19:52:04 2026
 """
 
 # services/chart_service.py
-# Day9 수정
-# 역할:
-# - data_service.py가 만든 dataset을 Plotly figure로 변환
-# - recession shading을 yref='paper' 방식으로 안정화
-#
-# 핵심:
-# - 좌측 축이 비어 있어도 recession shading이 사라지지 않음
-# - effective_axis 값만 보고 좌/우축 결정
-# - 축 제목은 실제 effective_axis 기준으로 생성
 
 import os
 
@@ -33,21 +24,25 @@ def debug_print(*args):
         print("[chart_service_debug]", *args)
 
 
-# ---------------------------
-# 색상 팔레트 (순서 기반)
-# ---------------------------
 COLOR_PALETTE = [
-    "#d62728",  # red
-    "#1f77b4",  # blue
-    "#2ca02c",  # green
-    "#ff7f0e",  # orange
-    "#9467bd",  # purple
-    "#8c564b",  # brown
-    "#e377c2",  # pink
-    "#7f7f7f",  # gray
-    "#bcbd22",  # olive
-    "#17becf",  # cyan
+    "#d62728",
+    "#1f77b4",
+    "#2ca02c",
+    "#ff7f0e",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
 ]
+
+REGIME_COLORS = {
+    "경기 과열": "#c58a2b",
+    "골디락스": "#e9d8a6",
+    "경기 둔화": "#a9a9a9",
+    "스태그플레이션": "#b7c9df",
+}
 
 
 def get_color_by_order(index, series_code):
@@ -130,6 +125,74 @@ def add_recession_shading(fig, start_date, end_date):
     return fig
 
 
+def add_recession_outline_boxes(fig, start_date, end_date):
+    rec_df = load_recession_data(start_date, end_date)
+
+    if rec_df.empty:
+        return fig
+
+    intervals = build_recession_intervals(rec_df)
+
+    for x0, x1 in intervals:
+        fig.add_shape(
+            type="rect",
+            xref="x",
+            yref="paper",
+            x0=x0,
+            x1=x1,
+            y0=0,
+            y1=1,
+            fillcolor="rgba(0,0,0,0)",
+            line=dict(
+                color="red",
+                width=1.5,
+                dash="dot",
+            ),
+            layer="above",
+        )
+
+    return fig
+
+
+def add_regime_shading(fig, intervals):
+    if not intervals:
+        return fig
+
+    for x0, x1, regime_name in intervals:
+        fig.add_shape(
+            type="rect",
+            xref="x",
+            yref="paper",
+            x0=x0,
+            x1=x1,
+            y0=0,
+            y1=1,
+            fillcolor=REGIME_COLORS.get(regime_name, "#cccccc"),
+            opacity=0.40,
+            layer="below",
+            line_width=0,
+        )
+
+    return fig
+
+
+def add_regime_legend_traces(fig):
+    for regime_name, color in REGIME_COLORS.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                line=dict(color=color, width=10),
+                name=regime_name,
+                showlegend=True,
+                hoverinfo="skip",
+            ),
+            secondary_y=False,
+        )
+    return fig
+
+
 def is_percent_unit(unit):
     if not unit:
         return False
@@ -177,7 +240,7 @@ def add_one_series_trace(fig, temp, index):
     effective_axis = str(temp["effective_axis"].iloc[0]).strip().lower()
     chart_type = str(temp["effective_chart_type"].iloc[0]).strip().lower()
     unit = temp["unit"].iloc[0]
-    
+
     axis_label = "R" if effective_axis == "right" else "L"
     legend_name = f"{series_name} ({axis_label})"
 
@@ -255,29 +318,45 @@ def build_empty_figure(message):
     return fig
 
 
-def build_main_figure(dataset, start_date, end_date, show_recession=True):
+def build_main_figure(
+    dataset,
+    start_date,
+    end_date,
+    show_recession=True,
+    recession_style="shading",
+    background_intervals=None,
+    chart_title=None,
+):
     if dataset is None or dataset.empty:
         return build_empty_figure("데이터가 없습니다.")
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-
     unique_codes = dataset["series_code"].dropna().unique().tolist()
 
     debug_print("build_main_figure | unique_codes =", unique_codes)
 
+    # 배경 먼저
+    if background_intervals:
+        fig = add_regime_shading(fig, background_intervals)
+
+    # 선 추가
     for idx, series_code in enumerate(unique_codes):
         temp = dataset[dataset["series_code"] == series_code].copy().sort_values("date_value")
         fig = add_one_series_trace(fig, temp, index=idx)
 
+    # 국면 legend 추가
+    if background_intervals:
+        fig = add_regime_legend_traces(fig)
+
+    # recession 처리
     if show_recession:
-        fig = add_recession_shading(fig, start_date, end_date)
+        if recession_style == "shading":
+            fig = add_recession_shading(fig, start_date, end_date)
+        elif recession_style == "outline":
+            fig = add_recession_outline_boxes(fig, start_date, end_date)
 
     left_title = build_axis_title(dataset, "left")
     right_title = build_axis_title(dataset, "right")
-
-    debug_print(
-        f"axis_titles | left={left_title} | right={right_title}"
-    )
 
     fig.update_yaxes(title_text=left_title, secondary_y=False, showgrid=True)
     fig.update_yaxes(title_text=right_title, secondary_y=True, showgrid=False)
@@ -289,7 +368,7 @@ def build_main_figure(dataset, start_date, end_date, show_recession=True):
     )
 
     fig.update_layout(
-        title="국내 주식 Monitor",
+        title=chart_title or "국내 주식 Monitor",
         template="plotly_white",
         hovermode="x unified",
         barmode="group",

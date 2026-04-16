@@ -7,16 +7,18 @@ Created on Wed Apr  1 18:27:55 2026
 
 # yahoo_to_mysql.py
 # Yahoo Finance (yfinance) -> MySQL
-
+#
 # 목적
 # 1) KOSPI / WTI / USDKRW:
 #    - 기존 CSV 적재분 + Yahoo 최신분을 같은 series_code로 연결 저장
 # 2) DXY:
 #    - Yahoo 단일 source로 전체 기간 적재
-
+# 3) S&P500:
+#    - Yahoo 단일 source로 전체 기간 적재
+#
 # 핵심 원칙
 # - DB 이후 구조(loading_common)는 그대로 재사용
-# - series_code는 기존 것과 동일하게 유지
+# - series_code는 프로젝트에서 일관되게 유지
 # - save 전에 기존 DB 히스토리를 다시 읽어와 Yahoo 데이터와 합친 뒤 저장
 #   -> series_meta.start_date / end_date가 과거 구간을 잃지 않도록 보호
 
@@ -63,6 +65,28 @@ SERIES_CONFIG = [
             "notes": "Yahoo Finance Close 적재 (CSV 과거구간 + Yahoo 최신구간 결합)",
             "source_series_code": "^KS11",
             "source_series_name": "KOSPI Index",
+            "transform_code": "yahoo_close",
+            "transform_name": "RAW",
+            "is_transformed": False,
+            "source_unit": "index",
+        },
+    },
+    {
+        "ticker": "^GSPC",
+        "start_date": "1950-01-03",
+        "series_info": {
+            "series_code": "SP500_YF",
+            "series_name": "S&P 500",
+            "category_name": "미국주식",
+            "frequency": "daily",
+            "unit": "index",
+            "chart_type": "line",
+            "default_axis": "left",
+            "default_color": None,
+            "is_recession_series": False,
+            "notes": "Yahoo Finance Close 적재 (Yahoo 단일 source)",
+            "source_series_code": "^GSPC",
+            "source_series_name": "S&P 500",
             "transform_code": "yahoo_close",
             "transform_name": "RAW",
             "is_transformed": False,
@@ -277,27 +301,31 @@ def load_one_series(source_id, config):
     print(
         f"[완료] {series_code} | "
         f"ticker={ticker} | "
-        f"existing={len(existing_df)} | "
-        f"yahoo={len(yahoo_df)} | "
-        f"final={len(final_df)}"
+        f"저장 건수={len(final_df)} | "
+        f"기간={final_df['date'].min()} ~ {final_df['date'].max()}"
     )
 
-    check_result(payload["series_code"], limit=5)
+    check_result(series_code, limit=10)
 
 
 # --------------------------------------------------
-# 메인 실행
+# 실행
 # --------------------------------------------------
 def main():
     source_id = get_source_id(SOURCE_CODE)
 
     for config in SERIES_CONFIG:
-        series_code = config["series_info"]["series_code"]
-
         try:
-            load_one_series(source_id=source_id, config=config)
+            print(
+                f"[시작] series_code={config['series_info']['series_code']} | "
+                f"ticker={config['ticker']}"
+            )
+            load_one_series(source_id, config)
         except Exception as e:
-            print(f"[실패] {series_code} | {e}")
+            print(
+                f"[실패] series_code={config['series_info']['series_code']} | "
+                f"ticker={config['ticker']} | 오류={e}"
+            )
 
 
 if __name__ == "__main__":

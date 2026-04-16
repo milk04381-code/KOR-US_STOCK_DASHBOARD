@@ -639,3 +639,12 @@ WHERE release_code IN ('EMPLOYMENT_SITUATION', 'CPI', 'JOLTS');
 SELECT series_code, series_name, frequency, unit, is_macro_tracker, is_active
 FROM series_meta
 WHERE series_code IN ('DFEDTAR', 'DFEDTARU');
+
+SHOW INDEX FROM series_meta;
+SHOW INDEX FROM series_data;
+
+CREATE INDEX idx_series_meta_country_category_active
+ON series_meta (country_code, macro_category, is_active);
+
+CREATE INDEX idx_series_data_date
+ON series_data (date_value);
