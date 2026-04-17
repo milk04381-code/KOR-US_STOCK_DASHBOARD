@@ -183,6 +183,7 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
         "fontWeight": "bold",
         "fontSize": "13px",
         "textAlign": "center",
+        "whiteSpace": "nowrap",
     }
 
     body_style = {
@@ -190,10 +191,15 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
         "padding": "8px 10px",
         "fontSize": "13px",
         "textAlign": "center",
+        "whiteSpace": "nowrap",
     }
 
-    header_cells = [html.Th("자산군", style=header_style)]
-    for idx, regime_name in enumerate(REGIME_ORDER):
+    header_cells = [
+        html.Th("자산군", style=header_style),
+        html.Th("구분", style=header_style),
+        html.Th("ETF", style=header_style),
+    ]
+    for regime_name in REGIME_ORDER:
         style = dict(header_style)
         if regime_name == current_regime:
             style["borderTop"] = "3px solid red"
@@ -202,11 +208,20 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
         header_cells.append(html.Th(regime_name, style=style))
 
     rows = []
-    first_asset = asset_return_df.iloc[0]["자산군"] if not asset_return_df.empty else None
-    last_asset = asset_return_df.iloc[-1]["자산군"] if not asset_return_df.empty else None
+    first_row_idx = 0 if not asset_return_df.empty else None
+    last_row_idx = len(asset_return_df) - 1 if not asset_return_df.empty else None
 
-    for _, row in asset_return_df.iterrows():
-        cells = [html.Td(row["자산군"], style={**body_style, "fontWeight": "bold"})]
+    prev_asset_group = None
+
+    for row_idx, (_, row) in enumerate(asset_return_df.iterrows()):
+        asset_group_text = row["자산군"] if row["자산군"] != prev_asset_group else ""
+        prev_asset_group = row["자산군"]
+
+        cells = [
+            html.Td(asset_group_text, style={**body_style, "fontWeight": "bold"}),
+            html.Td(row["구분"], style=body_style),
+            html.Td(row["ETF"], style={**body_style, "fontWeight": "bold"}),
+        ]
 
         for regime_name in REGIME_ORDER:
             style = dict(body_style)
@@ -214,9 +229,9 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
             if regime_name == current_regime:
                 style["borderLeft"] = "3px solid red"
                 style["borderRight"] = "3px solid red"
-                if row["자산군"] == first_asset:
+                if row_idx == first_row_idx:
                     style["borderTop"] = "3px solid red"
-                if row["자산군"] == last_asset:
+                if row_idx == last_row_idx:
                     style["borderBottom"] = "3px solid red"
 
             cells.append(html.Td(row[regime_name], style=style))
@@ -236,10 +251,6 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
                     "borderCollapse": "collapse",
                     "backgroundColor": "white",
                 },
-            ),
-            html.Div(
-                "자산군은 현재 placeholder입니다. 추후 실제 자산군 시계열을 연결하면 월평균 수익률로 교체됩니다.",
-                style={"fontSize": "12px", "color": "#666", "marginTop": "8px"},
             ),
         ],
         style={**card_style(), "marginTop": "16px"},
@@ -399,7 +410,11 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
 
     highlight_cols = [x for x in transition_columns if x.startswith(f"{current_regime}->")]
 
-    header_cells = [html.Th("자산군", style=header_style)]
+    header_cells = [
+        html.Th("자산군", style=header_style),
+        html.Th("구분", style=header_style),
+        html.Th("ETF", style=header_style),
+    ]
     for idx, col in enumerate(transition_columns):
         style = dict(header_style)
         if col in highlight_cols:
@@ -416,13 +431,20 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
             )
         )
 
-    first_asset = transition_table_df.iloc[0]["자산군"] if not transition_table_df.empty else None
-    last_asset = transition_table_df.iloc[-1]["자산군"] if not transition_table_df.empty else None
+    first_row_idx = 0 if not transition_table_df.empty else None
+    last_row_idx = len(transition_table_df) - 1 if not transition_table_df.empty else None
 
     rows = []
-    for _, row in transition_table_df.iterrows():
+    prev_asset_group = None
+
+    for row_idx, (_, row) in enumerate(transition_table_df.iterrows()):
+        asset_group_text = row["자산군"] if row["자산군"] != prev_asset_group else ""
+        prev_asset_group = row["자산군"]
+
         row_cells = [
-            html.Td(row["자산군"], style={**body_style, "fontWeight": "bold"})
+            html.Td(asset_group_text, style={**body_style, "fontWeight": "bold"}),
+            html.Td(row["구분"], style=body_style),
+            html.Td(row["ETF"], style={**body_style, "fontWeight": "bold"}),
         ]
 
         for idx, col in enumerate(transition_columns):
@@ -435,9 +457,9 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
                     style["borderLeft"] = "3px solid red"
                 if idx == transition_columns.index(highlight_cols[-1]):
                     style["borderRight"] = "3px solid red"
-                if row["자산군"] == first_asset:
+                if row_idx == first_row_idx:
                     style["borderTop"] = "3px solid red"
-                if row["자산군"] == last_asset:
+                if row_idx == last_row_idx:
                     style["borderBottom"] = "3px solid red"
 
             row_cells.append(html.Td(f"{value:.1f}", style=style))

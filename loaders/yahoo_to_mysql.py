@@ -15,6 +15,8 @@ Created on Wed Apr  1 18:27:55 2026
 #    - Yahoo 단일 source로 전체 기간 적재
 # 3) S&P500:
 #    - Yahoo 단일 source로 전체 기간 적재
+# 4) Macro Regime 자산배분용 ETF:
+#    - Yahoo 단일 source로 전체 기간 적재
 #
 # 핵심 원칙
 # - DB 이후 구조(loading_common)는 그대로 재사용
@@ -45,10 +47,45 @@ BASE_DIR = PROJECT_ROOT
 SOURCE_CODE = "YAHOO"
 
 
+def make_etf_config(
+    ticker,
+    start_date,
+    series_code,
+    series_name,
+    category_name="자산배분ETF",
+    unit="price",
+    default_axis="left",
+    source_unit="price",
+    notes="Yahoo Finance Close 적재 (Yahoo 단일 source)",
+):
+    return {
+        "ticker": ticker,
+        "start_date": start_date,
+        "series_info": {
+            "series_code": series_code,
+            "series_name": series_name,
+            "category_name": category_name,
+            "frequency": "daily",
+            "unit": unit,
+            "chart_type": "line",
+            "default_axis": default_axis,
+            "default_color": None,
+            "is_recession_series": False,
+            "notes": notes,
+            "source_series_code": ticker,
+            "source_series_name": series_name,
+            "transform_code": "yahoo_close",
+            "transform_name": "RAW",
+            "is_transformed": False,
+            "source_unit": source_unit,
+        },
+    }
+
+
 # --------------------------------------------------
 # 처리 대상 설정
 # --------------------------------------------------
-SERIES_CONFIG = [
+BASE_SERIES_CONFIG = [
     {
         "ticker": "^KS11",
         "start_date": "1996-12-11",
@@ -160,6 +197,35 @@ SERIES_CONFIG = [
         },
     },
 ]
+
+ETF_SERIES_CONFIG = [
+    # 주식
+    make_etf_config("ACWI", "2008-03-28", "ACWI", "iShares MSCI ACWI ETF"),
+    make_etf_config("URTH", "2012-01-10", "URTH", "iShares MSCI World ETF"),
+    make_etf_config("EEM", "2003-04-07", "EEM", "iShares MSCI Emerging Markets ETF"),
+    make_etf_config("SPY", "1993-01-29", "SPY", "SPDR S&P 500 ETF Trust"),
+
+    # 채권
+    make_etf_config("TLT", "2002-07-30", "TLT", "iShares 20+ Year Treasury Bond ETF"),
+    make_etf_config("LQD", "2002-07-30", "LQD", "iShares iBoxx $ Investment Grade Corporate Bond ETF"),
+    make_etf_config("HYG", "2007-04-04", "HYG", "iShares iBoxx $ High Yield Corporate Bond ETF"),
+
+    # 통화
+    make_etf_config("UUP", "2007-02-20", "UUP", "Invesco DB US Dollar Index Bullish Fund"),
+    make_etf_config("CEW", "2009-11-18", "CEW", "WisdomTree Emerging Currency Fund"),
+
+    # 원자재
+    make_etf_config("DBO", "2007-01-05", "DBO", "Invesco DB Oil Fund"),
+    make_etf_config("GLD", "2004-11-18", "GLD", "SPDR Gold Shares"),
+    make_etf_config("CPER", "2011-11-15", "CPER", "United States Copper Index Fund"),
+    make_etf_config("DBA", "2007-01-05", "DBA", "Invesco DB Agriculture Fund"),
+
+    # 대체자산
+    make_etf_config("REET", "2014-06-10", "REET", "iShares Global REIT ETF"),
+    make_etf_config("IGF", "2007-12-12", "IGF", "iShares Global Infrastructure ETF"),
+]
+
+SERIES_CONFIG = BASE_SERIES_CONFIG + ETF_SERIES_CONFIG
 
 
 # --------------------------------------------------
