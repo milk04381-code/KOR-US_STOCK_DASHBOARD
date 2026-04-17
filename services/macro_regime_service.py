@@ -87,6 +87,10 @@ def compute_macro_regime(cli_df, cpi_df):
 
 
 def build_regime_intervals(regime_df):
+    """
+    차트 shading용 interval.
+    각 국면의 끝점을 '다음 국면 시작월'로 둬서 배경이 빈틈 없이 채워지도록 한다.
+    """
     if regime_df.empty:
         return []
 
@@ -100,9 +104,7 @@ def build_regime_intervals(regime_df):
         row = df.loc[i]
 
         if row["regime"] != current_regime:
-            # 전환월은 새 국면의 시작월
-            # 이전 국면 interval 종료일은 직전 월이어야 중복이 없다.
-            intervals.append((start_date, df.loc[i - 1, "date_value"], current_regime))
+            intervals.append((start_date, row["date_value"], current_regime))
             start_date = row["date_value"]
             current_regime = row["regime"]
 
@@ -110,7 +112,37 @@ def build_regime_intervals(regime_df):
     return intervals
 
 
-def build_summary_table_df(regime_df, intervals):
+def build_regime_spells(regime_df):
+    """
+    통계(spell)용 연속 구간.
+    전환월은 새 국면의 시작월이므로, 이전 국면의 종료일은 직전 월로 둔다.
+    """
+    if regime_df.empty:
+        return []
+
+    df = regime_df.sort_values("date_value").reset_index(drop=True)
+
+    spells = []
+    start_date = df.loc[0, "date_value"]
+    current_regime = df.loc[0, "regime"]
+
+    for i in range(1, len(df)):
+        row = df.loc[i]
+
+        if row["regime"] != current_regime:
+            spells.append((start_date, df.loc[i - 1, "date_value"], current_regime))
+            start_date = row["date_value"]
+            current_regime = row["regime"]
+
+    spells.append((start_date, df["date_value"].iloc[-1], current_regime))
+    return spells
+
+
+def build_summary_table_df(regime_df, spells):
+    """
+    - 개월 수 / 비중(%): regime_df 실제 월 row 기준
+    - 시작횟수 / Avg / Median / Max: spell 기준
+    """
     # -------------------------
     # 1) 월 개수 / 비중: regime_df 실제 row 기준
     # -------------------------
@@ -131,11 +163,11 @@ def build_summary_table_df(regime_df, intervals):
         total_months = int(len(temp_regime_df))
 
     # -------------------------
-    # 2) 시작횟수 / Avg / Median / Max: interval(spell) 기준
+    # 2) spell 통계
     # -------------------------
-    interval_rows = []
-    for start_date, end_date, regime_name in intervals:
-        interval_rows.append(
+    spell_rows = []
+    for start_date, end_date, regime_name in spells:
+        spell_rows.append(
             {
                 "regime": regime_name,
                 "start_date": pd.to_datetime(start_date),
@@ -144,20 +176,20 @@ def build_summary_table_df(regime_df, intervals):
             }
         )
 
-    interval_df = pd.DataFrame(interval_rows)
+    spell_df = pd.DataFrame(spell_rows)
 
     result_rows = []
 
     for regime_name in REGIME_ORDER:
         actual_months = int(actual_month_count_map.get(regime_name, 0))
 
-        if interval_df.empty:
+        if spell_df.empty:
             occurrence_count = 0
             avg_months = 0.0
             median_months = 0.0
             max_months = 0
         else:
-            temp = interval_df[interval_df["regime"] == regime_name].copy()
+            temp = spell_df[spell_df["regime"] == regime_name].copy()
             occurrence_count = int(len(temp))
             avg_months = round(float(temp["months"].mean()), 1) if occurrence_count > 0 else 0.0
             median_months = round(float(temp["months"].median()), 1) if occurrence_count > 0 else 0.0
@@ -177,16 +209,16 @@ def build_summary_table_df(regime_df, intervals):
             }
         )
 
-    total_occurrence_count = int(len(interval_df)) if not interval_df.empty else 0
+    total_occurrence_count = int(len(spell_df)) if not spell_df.empty else 0
 
-    if interval_df.empty:
+    if spell_df.empty:
         total_avg_months = 0.0
         total_median_months = 0.0
         total_max_months = 0
     else:
-        total_avg_months = round(float(interval_df["months"].mean()), 1)
-        total_median_months = round(float(interval_df["months"].median()), 1)
-        total_max_months = int(interval_df["months"].max())
+        total_avg_months = round(float(spell_df["months"].mean()), 1)
+        total_median_months = round(float(spell_df["months"].median()), 1)
+        total_max_months = int(spell_df["months"].max())
 
     result_rows.append(
         {
@@ -221,7 +253,7 @@ def build_transition_matrix_df(regime_df):
 
     df = regime_df.sort_values("date_value").reset_index(drop=True)
 
-    # 마지막 관측월 제외:
+    # 마지막 관측월은 제외:
     # t월이 from 국면이고, t+1월이 실제로 존재하는 경우만 집계
     for i in range(len(df) - 1):
         from_regime = df.loc[i, "regime"]
@@ -283,8 +315,8 @@ def build_transition_matrix_df(regime_df):
     return result
 
 
-def build_current_regime_card(intervals):
-    if not intervals:
+def build_current_regime_card(spells):
+    if not spells:
         return {
             "current_regime": "-",
             "start_text": "-",
@@ -292,7 +324,7 @@ def build_current_regime_card(intervals):
             "latest_text": "-",
         }
 
-    start_date, end_date, regime_name = intervals[-1]
+    start_date, end_date, regime_name = spells[-1]
 
     return {
         "current_regime": regime_name,
@@ -366,7 +398,10 @@ def cached_macro_regime_payload(country, start_date, end_date):
     cpi_df = calc_dataset[calc_dataset["series_code"] == mapping["cpi"]].copy()
 
     regime_df = compute_macro_regime(cli_df, cpi_df)
-    intervals = build_regime_intervals(regime_df)
+
+    # 차트용 / 통계용 분리
+    chart_intervals = build_regime_intervals(regime_df)
+    spells = build_regime_spells(regime_df)
 
     if regime_df.empty:
         effective_start = pd.to_datetime(start_date)
@@ -375,9 +410,9 @@ def cached_macro_regime_payload(country, start_date, end_date):
         effective_start = regime_df["date_value"].min()
         effective_end = regime_df["date_value"].max()
 
-    summary_df = build_summary_table_df(regime_df, intervals)
+    summary_df = build_summary_table_df(regime_df, spells)
     transition_df = build_transition_matrix_df(regime_df)
-    current_card = build_current_regime_card(intervals)
+    current_card = build_current_regime_card(spells)
     asset_return_label, asset_return_df = build_asset_return_placeholder(effective_start, effective_end)
     transition_table_df, transition_columns, highlighted_from_regime = build_transition_table_placeholder(
         current_card["current_regime"]
@@ -385,7 +420,8 @@ def cached_macro_regime_payload(country, start_date, end_date):
 
     return {
         "chart_dataset": chart_dataset,
-        "intervals": intervals,
+        "intervals": chart_intervals,   # 차트 shading용
+        "spells": spells,               # 통계용 spell
         "regime_df": regime_df,
         "summary_df": summary_df,
         "transition_df": transition_df,
