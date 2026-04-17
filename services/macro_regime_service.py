@@ -32,9 +32,6 @@ COUNTRY_SERIES_MAP = {
 REGIME_ORDER = ["경기 과열", "골디락스", "경기 둔화", "스태그플레이션"]
 ASSET_GROUP_ORDER = ["주식", "채권", "통화", "원자재", "대체자산"]
 
-# -------------------------
-# [추가] 자산군별 ETF 매핑
-# -------------------------
 ASSET_PROXY_LIST = [
     {"자산군": "주식", "구분": "글로벌", "ETF": "ACWI"},
     {"자산군": "주식", "구분": "선진국", "ETF": "URTH"},
@@ -78,14 +75,8 @@ def compute_macro_regime(cli_df, cpi_df):
     df = pd.merge(cli, cpi, on="date_value", how="inner")
     df = df.sort_values("date_value").reset_index(drop=True)
 
-    # -------------------------
-    # Growth: OECD CLI 방향성
-    # -------------------------
     df["growth"] = df["cli"].diff()
 
-    # -------------------------
-    # Inflation: CPI YoY의 3MMA - 36MMA
-    # -------------------------
     df["cpi_yoy"] = df["cpi"].pct_change(periods=12) * 100.0
     df["cpi_yoy_3mma"] = df["cpi_yoy"].rolling(3).mean()
     df["cpi_yoy_36mma"] = df["cpi_yoy"].rolling(36).mean()
@@ -168,9 +159,6 @@ def build_summary_table_df(regime_df, spells):
     - 개월 수 / 비중(%): regime_df 실제 월 row 기준
     - 시작횟수 / Avg / Median / Max: spell 기준
     """
-    # -------------------------
-    # 1) 월 개수 / 비중: regime_df 실제 row 기준
-    # -------------------------
     if regime_df is None or regime_df.empty:
         actual_month_count_map = {regime_name: 0 for regime_name in REGIME_ORDER}
         total_months = 0
@@ -187,9 +175,6 @@ def build_summary_table_df(regime_df, spells):
         )
         total_months = int(len(temp_regime_df))
 
-    # -------------------------
-    # 2) spell 통계
-    # -------------------------
     spell_rows = []
     for start_date, end_date, regime_name in spells:
         spell_rows.append(
@@ -278,8 +263,6 @@ def build_transition_matrix_df(regime_df):
 
     df = regime_df.sort_values("date_value").reset_index(drop=True)
 
-    # 마지막 관측월은 제외:
-    # t월이 from 국면이고, t+1월이 실제로 존재하는 경우만 집계
     for i in range(len(df) - 1):
         from_regime = df.loc[i, "regime"]
         to_regime = df.loc[i + 1, "regime"]
@@ -307,7 +290,6 @@ def build_transition_matrix_df(regime_df):
         .reset_index(name="months")
     )
 
-    # 비중 분모 = 다음 달이 존재하는 from 국면 개월 수
     row_total_df = (
         months_df.groupby("from_regime")["months"]
         .sum()
@@ -359,9 +341,6 @@ def build_current_regime_card(spells):
     }
 
 
-# -------------------------
-# [추가] ETF 가격 로드
-# -------------------------
 def load_asset_price_dataset(start_date, end_date):
     selected_codes = [item["ETF"] for item in ASSET_PROXY_LIST]
 
@@ -372,21 +351,25 @@ def load_asset_price_dataset(start_date, end_date):
     )
 
 
-# -------------------------
-# [추가] 월간 수익률 계산
-# -------------------------
 def build_asset_monthly_return_df(asset_price_df):
     if asset_price_df is None or asset_price_df.empty:
         return pd.DataFrame(columns=["month", "ETF", "monthly_price", "monthly_return"])
 
-    df = asset_price_df.copy()
-    df["date_value"] = pd.to_datetime(df["date_value"])
-    df["value_num"] = pd.to_numeric(df["value_num"], errors="coerce")
-    df = df.dropna(subset=["date_value", "value_num"]).sort_values(["series_code", "date_value"])
+    df = asset_price_df[["series_code", "date_value", "value_num"]].copy()
+
+    df["date_value"] = pd.to_datetime(df["date_value"], errors="coerce")
+    df["value_num"] = pd.to_numeric(df["value_num"], errors="coerce", downcast="float")
+    df = df.dropna(subset=["date_value", "value_num"])
+
+    if df.empty:
+        return pd.DataFrame(columns=["month", "ETF", "monthly_price", "monthly_return"])
+
+    df["series_code"] = df["series_code"].astype("category")
+    df = df.sort_values(["series_code", "date_value"])
 
     result_frames = []
 
-    for etf, group in df.groupby("series_code"):
+    for etf, group in df.groupby("series_code", observed=True, sort=False):
         s = group.set_index("date_value")["value_num"].sort_index()
         monthly_price = s.resample("ME").last()
         monthly_return = monthly_price.pct_change()
@@ -404,22 +387,24 @@ def build_asset_monthly_return_df(asset_price_df):
 
     result = pd.concat(result_frames, ignore_index=True)
     result["month"] = pd.to_datetime(result["month"]).dt.to_period("M").dt.to_timestamp("M")
+    result["ETF"] = result["ETF"].astype("category")
+    result["monthly_price"] = pd.to_numeric(result["monthly_price"], downcast="float")
+    result["monthly_return"] = pd.to_numeric(result["monthly_return"], downcast="float")
+
     return result
 
 
-# -------------------------
-# [추가] forward 3M 계산
-# -------------------------
 def build_asset_forward_3m_df(asset_monthly_df):
     if asset_monthly_df is None or asset_monthly_df.empty:
         return pd.DataFrame(columns=["month", "ETF", "forward_3m_return"])
 
-    df = asset_monthly_df.copy()
+    df = asset_monthly_df[["month", "ETF", "monthly_price"]].copy()
     df = df.sort_values(["ETF", "month"]).reset_index(drop=True)
 
     df["forward_3m_return"] = (
-        df.groupby("ETF")["monthly_price"].shift(-3) / df["monthly_price"] - 1.0
+        df.groupby("ETF", observed=True)["monthly_price"].shift(-3) / df["monthly_price"] - 1.0
     )
+    df["forward_3m_return"] = pd.to_numeric(df["forward_3m_return"], downcast="float")
 
     return df[["month", "ETF", "forward_3m_return"]].copy()
 
@@ -441,14 +426,12 @@ def build_asset_return_placeholder(start_date, end_date):
     return label, pd.DataFrame(rows)
 
 
-# -------------------------
-# [추가] 실제 국면별 월평균 수익률 테이블
-# -------------------------
-def build_asset_return_table_df(start_date, end_date, regime_df):
+def build_asset_return_table_df(start_date, end_date, regime_df, asset_monthly_df=None):
     label = f"{format_ym(start_date)} ~ {format_ym(end_date)}"
 
-    asset_price_df = load_asset_price_dataset(start_date, end_date)
-    asset_monthly_df = build_asset_monthly_return_df(asset_price_df)
+    if asset_monthly_df is None:
+        asset_price_df = load_asset_price_dataset(start_date, end_date)
+        asset_monthly_df = build_asset_monthly_return_df(asset_price_df)
 
     if regime_df is None or regime_df.empty or asset_monthly_df.empty:
         return build_asset_return_placeholder(start_date, end_date)
@@ -456,6 +439,7 @@ def build_asset_return_table_df(start_date, end_date, regime_df):
     regime_month_df = regime_df[["date_value", "regime"]].copy()
     regime_month_df["month"] = pd.to_datetime(regime_month_df["date_value"]).dt.to_period("M").dt.to_timestamp("M")
     regime_month_df = regime_month_df[["month", "regime"]].drop_duplicates(subset=["month"])
+    regime_month_df["regime"] = regime_month_df["regime"].astype("category")
 
     merged_df = pd.merge(asset_monthly_df, regime_month_df, on="month", how="inner")
     merged_df = merged_df.dropna(subset=["monthly_return"])
@@ -463,7 +447,7 @@ def build_asset_return_table_df(start_date, end_date, regime_df):
     rows = []
     for item in ASSET_PROXY_LIST:
         etf = item["ETF"]
-        temp = merged_df[merged_df["ETF"] == etf].copy()
+        temp = merged_df[merged_df["ETF"] == etf]
 
         row = {
             "자산군": item["자산군"],
@@ -504,12 +488,11 @@ def build_transition_table_placeholder(current_regime):
     return pd.DataFrame(rows), scenario_columns, current_regime
 
 
-# -------------------------
-# [추가] 실제 전환 이후 3개월 수익률 테이블
-# -------------------------
-def build_transition_return_table_df(start_date, end_date, regime_df, current_regime):
-    asset_price_df = load_asset_price_dataset(start_date, end_date)
-    asset_monthly_df = build_asset_monthly_return_df(asset_price_df)
+def build_transition_return_table_df(start_date, end_date, regime_df, current_regime, asset_monthly_df=None):
+    if asset_monthly_df is None:
+        asset_price_df = load_asset_price_dataset(start_date, end_date)
+        asset_monthly_df = build_asset_monthly_return_df(asset_price_df)
+
     asset_forward_df = build_asset_forward_3m_df(asset_monthly_df)
 
     if regime_df is None or regime_df.empty or len(regime_df) < 2 or asset_forward_df.empty:
@@ -517,12 +500,17 @@ def build_transition_return_table_df(start_date, end_date, regime_df, current_re
 
     regime_month_df = regime_df[["date_value", "regime"]].copy()
     regime_month_df["month"] = pd.to_datetime(regime_month_df["date_value"]).dt.to_period("M").dt.to_timestamp("M")
-    regime_month_df = regime_month_df[["month", "regime"]].drop_duplicates(subset=["month"]).sort_values("month").reset_index(drop=True)
+    regime_month_df = (
+        regime_month_df[["month", "regime"]]
+        .drop_duplicates(subset=["month"])
+        .sort_values("month")
+        .reset_index(drop=True)
+    )
 
     regime_month_df["from_regime"] = regime_month_df["regime"].shift(1)
     regime_month_df["to_regime"] = regime_month_df["regime"]
+    regime_month_df = regime_month_df.dropna(subset=["from_regime", "to_regime"]).copy()
     regime_month_df["scenario"] = regime_month_df["from_regime"] + "->" + regime_month_df["to_regime"]
-    regime_month_df = regime_month_df.dropna(subset=["scenario"])
 
     merged_df = pd.merge(
         asset_forward_df,
@@ -540,7 +528,7 @@ def build_transition_return_table_df(start_date, end_date, regime_df, current_re
     rows = []
     for item in ASSET_PROXY_LIST:
         etf = item["ETF"]
-        temp = merged_df[merged_df["ETF"] == etf].copy()
+        temp = merged_df[merged_df["ETF"] == etf]
 
         row = {
             "자산군": item["자산군"],
@@ -564,7 +552,6 @@ def build_transition_return_table_df(start_date, end_date, regime_df, current_re
 def cached_macro_regime_payload(country, start_date, end_date):
     mapping = COUNTRY_SERIES_MAP[country]
 
-    # 차트 표시용: price + cli만
     chart_codes = [
         mapping["price"],
         mapping["cli"],
@@ -580,7 +567,6 @@ def cached_macro_regime_payload(country, start_date, end_date):
         },
     )
 
-    # 계산용: cli + cpi
     calc_dataset = load_chart_dataset(
         selected_codes=[mapping["cli"], mapping["cpi"]],
         start_date=start_date,
@@ -595,7 +581,6 @@ def cached_macro_regime_payload(country, start_date, end_date):
 
     regime_df = compute_macro_regime(cli_df, cpi_df)
 
-    # 차트용 / 통계용 분리
     chart_intervals = build_regime_intervals(regime_df)
     spells = build_regime_spells(regime_df)
 
@@ -610,13 +595,16 @@ def cached_macro_regime_payload(country, start_date, end_date):
     transition_df = build_transition_matrix_df(regime_df)
     current_card = build_current_regime_card(spells)
 
-    # -------------------------
-    # [수정] placeholder -> 실제 ETF 테이블
-    # -------------------------
+    # 핵심 최적화:
+    # ETF 가격 조회 / 월간 리샘플링을 한 번만 수행하고 아래 두 테이블이 공유
+    asset_price_df = load_asset_price_dataset(effective_start, effective_end)
+    asset_monthly_df = build_asset_monthly_return_df(asset_price_df)
+
     asset_return_label, asset_return_df = build_asset_return_table_df(
         effective_start,
         effective_end,
         regime_df,
+        asset_monthly_df=asset_monthly_df,
     )
 
     transition_table_df, transition_columns, highlighted_from_regime = build_transition_return_table_df(
@@ -624,12 +612,13 @@ def cached_macro_regime_payload(country, start_date, end_date):
         effective_end,
         regime_df,
         current_card["current_regime"],
+        asset_monthly_df=asset_monthly_df,
     )
 
     return {
         "chart_dataset": chart_dataset,
-        "intervals": chart_intervals,   # 차트 shading용
-        "spells": spells,               # 통계용 spell
+        "intervals": chart_intervals,
+        "spells": spells,
         "regime_df": regime_df,
         "summary_df": summary_df,
         "transition_df": transition_df,
