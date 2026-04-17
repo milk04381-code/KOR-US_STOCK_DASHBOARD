@@ -234,6 +234,24 @@ def make_hovertemplate(unit):
     )
 
 
+def downsample_series(df, max_points=1500):
+    if df is None or df.empty:
+        return df
+
+    if len(df) <= max_points:
+        return df
+
+    step = max(1, len(df) // max_points)
+    sampled = df.iloc[::step].copy()
+
+    last_idx = df.index[-1]
+    if sampled.index[-1] != last_idx:
+        sampled = pd.concat([sampled, df.iloc[[-1]]], axis=0)
+
+    sampled = sampled[~sampled.index.duplicated(keep="last")]
+    return sampled
+
+
 def add_one_series_trace(fig, temp, index):
     series_code = temp["series_code"].iloc[0]
     series_name = temp["series_name"].iloc[0]
@@ -342,6 +360,7 @@ def build_main_figure(
     # 선 추가
     for idx, series_code in enumerate(unique_codes):
         temp = dataset[dataset["series_code"] == series_code].copy().sort_values("date_value")
+        temp = downsample_series(temp, max_points=1500)
         fig = add_one_series_trace(fig, temp, index=idx)
 
     # 국면 legend 추가
