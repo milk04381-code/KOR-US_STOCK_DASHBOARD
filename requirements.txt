@@ -1,6 +1,6 @@
-dash==2.17.0
-plotly==5.22.0
-pandas==2.1.4
+dash
+plotly
+pandas==2.3.3
 sqlalchemy
 pymysql
 python-dotenv
