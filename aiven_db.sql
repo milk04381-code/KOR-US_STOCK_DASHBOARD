@@ -649,3 +649,18 @@ ON series_meta (country_code, macro_category, is_active);
 CREATE INDEX idx_series_data_date
 ON series_data (date_value);
 
+SELECT m.series_code, COUNT(*) AS row_count,
+       MIN(d.date_value) AS min_date,
+       MAX(d.date_value) AS max_date
+FROM series_meta m
+LEFT JOIN series_data d
+  ON m.series_id = d.series_id
+WHERE m.series_code IN (
+  'ACWI','URTH','EEM','SPY',
+  'TLT','LQD','HYG',
+  'UUP','CEW',
+  'DBO','GLD','CPER','DBA',
+  'REET','IGF'
+)
+GROUP BY m.series_code
+ORDER BY m.series_code;

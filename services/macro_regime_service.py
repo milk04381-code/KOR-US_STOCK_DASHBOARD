@@ -388,7 +388,7 @@ def build_asset_monthly_return_df(asset_price_df):
 
     for etf, group in df.groupby("series_code"):
         s = group.set_index("date_value")["value_num"].sort_index()
-        monthly_price = s.resample("M").last()
+        monthly_price = s.resample("ME").last()
         monthly_return = monthly_price.pct_change()
 
         temp = pd.DataFrame({
