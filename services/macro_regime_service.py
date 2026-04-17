@@ -100,7 +100,9 @@ def build_regime_intervals(regime_df):
         row = df.loc[i]
 
         if row["regime"] != current_regime:
-            intervals.append((start_date, row["date_value"], current_regime))
+            # 전환월은 새 국면의 시작월
+            # 이전 국면 interval 종료일은 직전 월이어야 중복이 없다.
+            intervals.append((start_date, df.loc[i - 1, "date_value"], current_regime))
             start_date = row["date_value"]
             current_regime = row["regime"]
 
@@ -108,11 +110,32 @@ def build_regime_intervals(regime_df):
     return intervals
 
 
-def build_summary_table_df(intervals):
-    rows = []
+def build_summary_table_df(regime_df, intervals):
+    # -------------------------
+    # 1) 월 개수 / 비중: regime_df 실제 row 기준
+    # -------------------------
+    if regime_df is None or regime_df.empty:
+        actual_month_count_map = {regime_name: 0 for regime_name in REGIME_ORDER}
+        total_months = 0
+    else:
+        temp_regime_df = regime_df.copy()
+        temp_regime_df["date_value"] = pd.to_datetime(temp_regime_df["date_value"])
+        temp_regime_df = temp_regime_df.sort_values("date_value").reset_index(drop=True)
 
+        actual_month_count_map = (
+            temp_regime_df.groupby("regime")
+            .size()
+            .reindex(REGIME_ORDER, fill_value=0)
+            .to_dict()
+        )
+        total_months = int(len(temp_regime_df))
+
+    # -------------------------
+    # 2) 시작횟수 / Avg / Median / Max: interval(spell) 기준
+    # -------------------------
+    interval_rows = []
     for start_date, end_date, regime_name in intervals:
-        rows.append(
+        interval_rows.append(
             {
                 "regime": regime_name,
                 "start_date": pd.to_datetime(start_date),
@@ -121,104 +144,123 @@ def build_summary_table_df(intervals):
             }
         )
 
-    interval_df = pd.DataFrame(rows)
-
-    if interval_df.empty:
-        result_rows = []
-        for regime_name in REGIME_ORDER:
-            result_rows.append(
-                {
-                    "국면": regime_name,
-                    "총 국면수(개월)": 0,
-                    "비중(%)": 0.0,
-                    "발생횟수(회)": 0,
-                    "평균 유지 개월": 0.0,
-                }
-            )
-
-        result_rows.append(
-            {
-                "국면": "총계",
-                "총 국면수(개월)": 0,
-                "비중(%)": 100.0,
-                "발생횟수(회)": 0,
-                "평균 유지 개월": 0.0,
-            }
-        )
-        return pd.DataFrame(result_rows)
-
-    total_months = int(interval_df["months"].sum())
+    interval_df = pd.DataFrame(interval_rows)
 
     result_rows = []
+
     for regime_name in REGIME_ORDER:
-        temp = interval_df[interval_df["regime"] == regime_name].copy()
-        total_regime_months = int(temp["months"].sum())
-        occurrence_count = int(len(temp))
-        avg_months = round(total_regime_months / occurrence_count, 1) if occurrence_count > 0 else 0.0
-        weight_pct = round((total_regime_months / total_months) * 100, 1) if total_months > 0 else 0.0
+        actual_months = int(actual_month_count_map.get(regime_name, 0))
+
+        if interval_df.empty:
+            occurrence_count = 0
+            avg_months = 0.0
+            median_months = 0.0
+            max_months = 0
+        else:
+            temp = interval_df[interval_df["regime"] == regime_name].copy()
+            occurrence_count = int(len(temp))
+            avg_months = round(float(temp["months"].mean()), 1) if occurrence_count > 0 else 0.0
+            median_months = round(float(temp["months"].median()), 1) if occurrence_count > 0 else 0.0
+            max_months = int(temp["months"].max()) if occurrence_count > 0 else 0
+
+        weight_pct = round((actual_months / total_months) * 100, 1) if total_months > 0 else 0.0
 
         result_rows.append(
             {
                 "국면": regime_name,
-                "총 국면수(개월)": total_regime_months,
+                "개월 수": actual_months,
                 "비중(%)": weight_pct,
-                "발생횟수(회)": occurrence_count,
-                "평균 유지 개월": avg_months,
+                "시작횟수(회)": occurrence_count,
+                "평균 유지 개월(Avg)": avg_months,
+                "중앙값(Median)": median_months,
+                "최댓값(Max)": max_months,
             }
         )
+
+    total_occurrence_count = int(len(interval_df)) if not interval_df.empty else 0
+
+    if interval_df.empty:
+        total_avg_months = 0.0
+        total_median_months = 0.0
+        total_max_months = 0
+    else:
+        total_avg_months = round(float(interval_df["months"].mean()), 1)
+        total_median_months = round(float(interval_df["months"].median()), 1)
+        total_max_months = int(interval_df["months"].max())
 
     result_rows.append(
         {
             "국면": "총계",
-            "총 국면수(개월)": total_months,
+            "개월 수": total_months,
             "비중(%)": 100.0 if total_months > 0 else 0.0,
-            "발생횟수(회)": int(len(interval_df)),
-            "평균 유지 개월": round(total_months / len(interval_df), 1) if len(interval_df) > 0 else 0.0,
+            "시작횟수(회)": total_occurrence_count,
+            "평균 유지 개월(Avg)": total_avg_months,
+            "중앙값(Median)": total_median_months,
+            "최댓값(Max)": total_max_months,
         }
     )
 
     return pd.DataFrame(result_rows)
 
 
-def build_transition_matrix_df(intervals):
+def build_transition_matrix_df(regime_df):
     rows = []
 
-    if len(intervals) < 2:
+    if regime_df is None or regime_df.empty or len(regime_df) < 2:
         for from_regime in REGIME_ORDER:
             for to_regime in REGIME_ORDER:
                 rows.append(
                     {
                         "from_regime": from_regime,
                         "to_regime": to_regime,
-                        "count": 0,
-                        "prob": 0.0,
+                        "months": 0,
+                        "ratio": 0.0,
                     }
                 )
         return pd.DataFrame(rows)
 
-    for i in range(len(intervals) - 1):
-        from_regime = intervals[i][2]
-        to_regime = intervals[i + 1][2]
+    df = regime_df.sort_values("date_value").reset_index(drop=True)
+
+    # 마지막 관측월 제외:
+    # t월이 from 국면이고, t+1월이 실제로 존재하는 경우만 집계
+    for i in range(len(df) - 1):
+        from_regime = df.loc[i, "regime"]
+        to_regime = df.loc[i + 1, "regime"]
         rows.append({"from_regime": from_regime, "to_regime": to_regime})
 
     raw_df = pd.DataFrame(rows)
 
-    count_df = (
+    if raw_df.empty:
+        full_rows = []
+        for from_regime in REGIME_ORDER:
+            for to_regime in REGIME_ORDER:
+                full_rows.append(
+                    {
+                        "from_regime": from_regime,
+                        "to_regime": to_regime,
+                        "months": 0,
+                        "ratio": 0.0,
+                    }
+                )
+        return pd.DataFrame(full_rows)
+
+    months_df = (
         raw_df.groupby(["from_regime", "to_regime"])
         .size()
-        .reset_index(name="count")
+        .reset_index(name="months")
     )
 
+    # 비중 분모 = 다음 달이 존재하는 from 국면 개월 수
     row_total_df = (
-        count_df.groupby("from_regime")["count"]
+        months_df.groupby("from_regime")["months"]
         .sum()
-        .reset_index(name="row_total")
+        .reset_index(name="row_total_months")
     )
 
-    count_df = count_df.merge(row_total_df, on="from_regime", how="left")
-    count_df["prob"] = np.where(
-        count_df["row_total"] > 0,
-        (count_df["count"] / count_df["row_total"] * 100).round(1),
+    months_df = months_df.merge(row_total_df, on="from_regime", how="left")
+    months_df["ratio"] = np.where(
+        months_df["row_total_months"] > 0,
+        (months_df["months"] / months_df["row_total_months"] * 100).round(1),
         0.0,
     )
 
@@ -230,12 +272,13 @@ def build_transition_matrix_df(intervals):
     full_df = pd.DataFrame(full_rows)
 
     result = full_df.merge(
-        count_df[["from_regime", "to_regime", "count", "prob"]],
+        months_df[["from_regime", "to_regime", "months", "ratio"]],
         on=["from_regime", "to_regime"],
         how="left",
-    ).fillna({"count": 0, "prob": 0.0})
+    ).fillna({"months": 0, "ratio": 0.0})
 
-    result["count"] = result["count"].astype(int)
+    result["months"] = result["months"].astype(int)
+    result["ratio"] = result["ratio"].astype(float)
 
     return result
 
@@ -332,8 +375,8 @@ def cached_macro_regime_payload(country, start_date, end_date):
         effective_start = regime_df["date_value"].min()
         effective_end = regime_df["date_value"].max()
 
-    summary_df = build_summary_table_df(intervals)
-    transition_df = build_transition_matrix_df(intervals)
+    summary_df = build_summary_table_df(regime_df, intervals)
+    transition_df = build_transition_matrix_df(regime_df)
     current_card = build_current_regime_card(intervals)
     asset_return_label, asset_return_df = build_asset_return_placeholder(effective_start, effective_end)
     transition_table_df, transition_columns, highlighted_from_regime = build_transition_table_placeholder(

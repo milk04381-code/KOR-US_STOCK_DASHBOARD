@@ -648,3 +648,4 @@ ON series_meta (country_code, macro_category, is_active);
 
 CREATE INDEX idx_series_data_date
 ON series_data (date_value);
+

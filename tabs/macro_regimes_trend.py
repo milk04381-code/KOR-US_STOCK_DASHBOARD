@@ -60,6 +60,7 @@ def build_summary_table(summary_df, current_regime):
         "fontWeight": "bold",
         "fontSize": "13px",
         "textAlign": "center",
+        "whiteSpace": "nowrap",
     }
 
     body_style = {
@@ -67,6 +68,7 @@ def build_summary_table(summary_df, current_regime):
         "padding": "8px 10px",
         "fontSize": "13px",
         "textAlign": "center",
+        "whiteSpace": "nowrap",
     }
 
     rows = []
@@ -89,7 +91,7 @@ def build_summary_table(summary_df, current_regime):
                         },
                     ),
                     html.Td(
-                        f"{int(row['총 국면수(개월)'])}",
+                        f"{int(row['개월 수'])}",
                         style={
                             **body_style,
                             "borderTop": "3px solid #333" if is_total else ("3px solid red" if is_current else body_style["border"]),
@@ -105,7 +107,7 @@ def build_summary_table(summary_df, current_regime):
                         },
                     ),
                     html.Td(
-                        f"{int(row['발생횟수(회)'])}",
+                        f"{int(row['시작횟수(회)'])}",
                         style={
                             **body_style,
                             "borderTop": "3px solid #333" if is_total else ("3px solid red" if is_current else body_style["border"]),
@@ -113,7 +115,23 @@ def build_summary_table(summary_df, current_regime):
                         },
                     ),
                     html.Td(
-                        f"{row['평균 유지 개월']:.1f}",
+                        f"{row['평균 유지 개월(Avg)']:.1f}",
+                        style={
+                            **body_style,
+                            "borderTop": "3px solid #333" if is_total else ("3px solid red" if is_current else body_style["border"]),
+                            "borderBottom": "3px solid red" if is_current else body_style["border"],
+                        },
+                    ),
+                    html.Td(
+                        f"{row['중앙값(Median)']:.1f}",
+                        style={
+                            **body_style,
+                            "borderTop": "3px solid #333" if is_total else ("3px solid red" if is_current else body_style["border"]),
+                            "borderBottom": "3px solid red" if is_current else body_style["border"],
+                        },
+                    ),
+                    html.Td(
+                        f"{int(row['최댓값(Max)'])}",
                         style={
                             **body_style,
                             "borderTop": "3px solid #333" if is_total else ("3px solid red" if is_current else body_style["border"]),
@@ -135,10 +153,12 @@ def build_summary_table(summary_df, current_regime):
                         html.Tr(
                             [
                                 html.Th("국면", style=header_style),
-                                html.Th("총 국면수(개월)", style=header_style),
+                                html.Th("개월 수", style=header_style),
                                 html.Th("비중(%)", style=header_style),
-                                html.Th("발생횟수(회)", style=header_style),
-                                html.Th("평균 유지 개월", style=header_style),
+                                html.Th("시작횟수(회)", style=header_style),
+                                html.Th("평균 유지 개월(Avg)", style=header_style),
+                                html.Th("중앙값(Median)", style=header_style),
+                                html.Th("최댓값(Max)", style=header_style),
                             ]
                         )
                     ),
@@ -227,9 +247,16 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
 
 
 def build_transition_matrix_table(transition_df, current_regime):
-    pivot = (
+    months_pivot = (
         transition_df
-        .pivot(index="from_regime", columns="to_regime", values="prob")
+        .pivot(index="from_regime", columns="to_regime", values="months")
+        .reindex(index=REGIME_ORDER, columns=REGIME_ORDER)
+        .fillna(0)
+    )
+
+    ratio_pivot = (
+        transition_df
+        .pivot(index="from_regime", columns="to_regime", values="ratio")
         .reindex(index=REGIME_ORDER, columns=REGIME_ORDER)
         .fillna(0.0)
     )
@@ -248,6 +275,7 @@ def build_transition_matrix_table(transition_df, current_regime):
         "padding": "8px 10px",
         "fontSize": "13px",
         "textAlign": "center",
+        "whiteSpace": "nowrap",
     }
 
     rows = []
@@ -276,9 +304,12 @@ def build_transition_matrix_table(transition_df, current_regime):
                 if col_idx == len(REGIME_ORDER) - 1:
                     cell_style["borderRight"] = "3px solid red"
 
+            months_value = int(months_pivot.loc[regime_name, to_regime])
+            ratio_value = float(ratio_pivot.loc[regime_name, to_regime])
+
             row_cells.append(
                 html.Td(
-                    f"{pivot.loc[regime_name, to_regime]:.1f}",
+                    f"{months_value} / {ratio_value:.1f}",
                     style=cell_style,
                 )
             )
@@ -287,7 +318,7 @@ def build_transition_matrix_table(transition_df, current_regime):
 
     return html.Div(
         [
-            section_title("전환 통계"),
+            section_title("유지/전환 matrix"),
             html.Table(
                 [
                     html.Thead(
@@ -307,6 +338,14 @@ def build_transition_matrix_table(transition_df, current_regime):
             html.Div(
                 f"현재 국면 row 강조: {current_regime}",
                 style={"fontSize": "12px", "color": "#666", "marginTop": "8px"},
+            ),
+            html.Div(
+                "단위: 개월 수 / 비중(%)",
+                style={"fontSize": "12px", "color": "#666", "marginTop": "4px"},
+            ),
+            html.Div(
+                "기준: 마지막 관측월은 제외, 비중 분모는 다음 달이 존재하는 from 국면 개월 수",
+                style={"fontSize": "12px", "color": "#666", "marginTop": "4px"},
             ),
         ],
         style=card_style(),
