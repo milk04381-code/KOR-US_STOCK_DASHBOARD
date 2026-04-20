@@ -225,6 +225,7 @@ def build_asset_return_table(label_text, asset_return_df, current_regime):
 
         for regime_name in REGIME_ORDER:
             style = dict(body_style)
+            style["backgroundColor"] = _cell_fill_color(row[regime_name])
 
             if regime_name == current_regime:
                 style["borderLeft"] = "3px solid red"
@@ -376,15 +377,15 @@ def _cell_fill_color(value):
         return "#ffffff"
 
     if v > 0:
-        if v >= 8:
+        if v >= 2:
             return "#7bc67e"
-        if v >= 4:
+        if v >= 1:
             return "#a6dba0"
         return "#d9f0d3"
 
-    if v <= -8:
+    if v <= -2:
         return "#fb6a6a"
-    if v <= -4:
+    if v <= -1:
         return "#fcaeae"
     return "#fde0dd"
 
@@ -408,12 +409,58 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
         "whiteSpace": "nowrap",
     }
 
+    sticky_left_1 = 0
+    sticky_left_2 = 90
+    sticky_left_3 = 180
+
+    sticky_header_base = {
+        "position": "sticky",
+        "zIndex": 4,
+        "backgroundColor": "#f3f3f3",
+    }
+
+    sticky_body_base = {
+        "position": "sticky",
+        "zIndex": 3,
+        "backgroundColor": "white",
+    }
+
     highlight_cols = [x for x in transition_columns if x.startswith(f"{current_regime}->")]
 
     header_cells = [
-        html.Th("자산군", style=header_style),
-        html.Th("구분", style=header_style),
-        html.Th("ETF", style=header_style),
+        html.Th(
+            "자산군",
+            style={
+                **header_style,
+                **sticky_header_base,
+                "left": f"{sticky_left_1}px",
+                "minWidth": "90px",
+                "width": "90px",
+                "maxWidth": "90px",
+            },
+        ),
+        html.Th(
+            "구분",
+            style={
+                **header_style,
+                **sticky_header_base,
+                "left": f"{sticky_left_2}px",
+                "minWidth": "90px",
+                "width": "90px",
+                "maxWidth": "90px",
+            },
+        ),
+        html.Th(
+            "ETF",
+            style={
+                **header_style,
+                **sticky_header_base,
+                "left": f"{sticky_left_3}px",
+                "minWidth": "90px",
+                "width": "90px",
+                "maxWidth": "90px",
+            },
+        ),
     ]
     for idx, col in enumerate(transition_columns):
         style = dict(header_style)
@@ -442,9 +489,41 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
         prev_asset_group = row["자산군"]
 
         row_cells = [
-            html.Td(asset_group_text, style={**body_style, "fontWeight": "bold"}),
-            html.Td(row["구분"], style=body_style),
-            html.Td(row["ETF"], style={**body_style, "fontWeight": "bold"}),
+            html.Td(
+                asset_group_text,
+                style={
+                    **body_style,
+                    **sticky_body_base,
+                    "left": f"{sticky_left_1}px",
+                    "fontWeight": "bold",
+                    "minWidth": "90px",
+                    "width": "90px",
+                    "maxWidth": "90px",
+                },
+            ),
+            html.Td(
+                row["구분"],
+                style={
+                    **body_style,
+                    **sticky_body_base,
+                    "left": f"{sticky_left_2}px",
+                    "minWidth": "90px",
+                    "width": "90px",
+                    "maxWidth": "90px",
+                },
+            ),
+            html.Td(
+                row["ETF"],
+                style={
+                    **body_style,
+                    **sticky_body_base,
+                    "left": f"{sticky_left_3}px",
+                    "fontWeight": "bold",
+                    "minWidth": "90px",
+                    "width": "90px",
+                    "maxWidth": "90px",
+                },
+            ),
         ]
 
         for idx, col in enumerate(transition_columns):
@@ -468,7 +547,7 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
 
     return html.Div(
         [
-            section_title("자산군별 전환 이후 3개월 수익률"),
+            section_title("유지/전환 이후 자산군별 3개월 수익률"),
             html.Div(
                 html.Table(
                     [
@@ -481,7 +560,10 @@ def build_transition_return_table(transition_table_df, transition_columns, curre
                         "minWidth": "1200px",
                     },
                 ),
-                style={"overflowX": "auto"},
+                style={
+                    "overflowX": "auto",
+                    "position": "relative",
+                },
             ),
             html.Div(
                 f"현재 국면 column block 강조: {current_regime}→*",
