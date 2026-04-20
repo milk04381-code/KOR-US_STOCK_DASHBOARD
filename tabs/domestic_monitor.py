@@ -42,7 +42,7 @@ def get_layout(series_options, default_value):
 
                     html.Div(
                         [
-                            html.Label("축 선택"),
+                            html.Label("축/선행·후행/역축 설정"),
                             html.Div(
                                 id="axis-selector-container",
                                 style={
@@ -149,13 +149,44 @@ def register_callbacks(app):
                             value="",
                             clearable=False,
                             style={
-                                "width": "160px",
+                                "width": "140px",
+                                "display": "inline-block",
+                                "verticalAlign": "middle",
+                                "marginRight": "12px",
+                            },
+                        ),
+                        html.Span(
+                            "시차(개월)",
+                            style={
+                                "display": "inline-block",
+                                "marginRight": "6px",
+                                "fontSize": "13px",
+                            },
+                        ),
+                        dcc.Input(
+                            id={"type": "shift-input", "index": code},
+                            type="number",
+                            value=0,
+                            step=1,
+                            style={
+                                "width": "80px",
+                                "display": "inline-block",
+                                "verticalAlign": "middle",
+                                "marginRight": "12px",
+                            },
+                        ),
+                        dcc.Checklist(
+                            id={"type": "reverse-check", "index": code},
+                            options=[{"label": "역축", "value": "reverse"}],
+                            value=[],
+                            style={
                                 "display": "inline-block",
                                 "verticalAlign": "middle",
                             },
+                            inline=True,
                         ),
                     ],
-                    style={"marginBottom": "6px"},
+                    style={"marginBottom": "8px"},
                 )
             )
 
@@ -170,18 +201,44 @@ def register_callbacks(app):
         Input("recession-check", "value"),
         Input({"type": "axis-dropdown", "index": ALL}, "value"),
         Input({"type": "axis-dropdown", "index": ALL}, "id"),
+        Input({"type": "shift-input", "index": ALL}, "value"),
+        Input({"type": "shift-input", "index": ALL}, "id"),
+        Input({"type": "reverse-check", "index": ALL}, "value"),
+        Input({"type": "reverse-check", "index": ALL}, "id"),
     )
-    def update_chart(selected_codes, start_date, end_date, recession_value, axis_values, axis_ids):
+    def update_chart(
+        selected_codes,
+        start_date,
+        end_date,
+        recession_value,
+        axis_values,
+        axis_ids,
+        shift_values,
+        shift_ids,
+        reverse_values,
+        reverse_ids,
+    ):
         selected_codes = normalize_selected_codes(selected_codes)
 
         if end_date is None:
             end_date = date.today().isoformat()
 
         axis_override_map = {}
-
         for axis_value, axis_id in zip(axis_values, axis_ids):
             if axis_value in ("left", "right"):
                 axis_override_map[axis_id["index"]] = axis_value
+
+        shift_month_map = {}
+        for shift_value, shift_id in zip(shift_values, shift_ids):
+            code = shift_id["index"]
+            try:
+                shift_month_map[code] = int(shift_value or 0)
+            except Exception:
+                shift_month_map[code] = 0
+
+        reverse_axis_map = {}
+        for reverse_value, reverse_id in zip(reverse_values, reverse_ids):
+            reverse_axis_map[reverse_id["index"]] = "reverse" in (reverse_value or [])
 
         dataset = load_chart_dataset(
             selected_codes=selected_codes,
@@ -195,18 +252,41 @@ def register_callbacks(app):
             start_date=start_date,
             end_date=end_date,
             show_recession=("show" in (recession_value or [])),
+            shift_month_map=shift_month_map,
+            reverse_axis_map=reverse_axis_map,
+            show_latest_value_labels=True,
         )
 
         selected_count = len(selected_codes)
 
         if selected_count > 0:
+            settings_parts = []
+
             if axis_override_map:
                 override_text = ", ".join(
                     [f"{code}:{axis}" for code, axis in axis_override_map.items()]
                 )
+                settings_parts.append(f"축 지정: {override_text}")
+
+            nonzero_shift_items = [
+                f"{code}:{months:+d}M"
+                for code, months in shift_month_map.items()
+                if months != 0
+            ]
+            if nonzero_shift_items:
+                settings_parts.append(f"시차: {', '.join(nonzero_shift_items)}")
+
+            reversed_items = [
+                code for code, is_reversed in reverse_axis_map.items()
+                if is_reversed
+            ]
+            if reversed_items:
+                settings_parts.append(f"역축: {', '.join(reversed_items)}")
+
+            if settings_parts:
                 summary_text = (
                     f"선택 지표: {selected_count}개 | 기간: {start_date} ~ {end_date} | "
-                    f"축 지정: {override_text}"
+                    + " | ".join(settings_parts)
                 )
             else:
                 summary_text = f"선택 지표: {selected_count}개 | 기간: {start_date} ~ {end_date}"
