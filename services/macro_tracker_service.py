@@ -449,17 +449,54 @@ def load_policy_target_upper_series(end_date=None):
     return merged
 
 
-def _get_policy_target_asof(policy_df, ref_date):
-    if policy_df is None or policy_df.empty or ref_date is None:
+def _prepare_policy_lookup(policy_df):
+    if policy_df is None or policy_df.empty:
         return None
 
-    ref_ts = pd.to_datetime(ref_date)
-    temp = policy_df.loc[policy_df["date_value"] <= ref_ts]
+    temp_df = policy_df.copy()
+    temp_df["date_value"] = pd.to_datetime(
+        temp_df["date_value"],
+        errors="coerce",
+        utc=True,
+    ).dt.tz_convert(None)
+    temp_df["target_upper"] = pd.to_numeric(temp_df["target_upper"], errors="coerce")
+    temp_df = temp_df.dropna(subset=["date_value", "target_upper"])
 
-    if temp.empty:
+    if temp_df.empty:
         return None
 
-    return float(temp["target_upper"].iloc[-1])
+    temp_df = (
+        temp_df.sort_values("date_value")
+        .drop_duplicates(subset=["date_value"], keep="last")
+        .reset_index(drop=True)
+    )
+
+    return {
+        "dates": pd.DatetimeIndex(temp_df["date_value"]),
+        "rates": temp_df["target_upper"].astype(float).to_numpy(),
+    }
+
+
+def _get_policy_target_asof(policy_lookup, ref_date):
+    if policy_lookup is None or ref_date is None:
+        return None
+
+    ref_ts = pd.to_datetime(ref_date, errors="coerce")
+    if pd.isna(ref_ts):
+        return None
+
+    if getattr(ref_ts, "tzinfo", None) is not None:
+        ref_ts = ref_ts.tz_convert(None)
+
+    dates = policy_lookup["dates"]
+    rates = policy_lookup["rates"]
+
+    idx = dates.searchsorted(ref_ts, side="right") - 1
+
+    if idx < 0:
+        return None
+
+    return float(rates[idx])
 
 
 def _classify_policy_phase(previous_rate, current_rate):
@@ -483,9 +520,16 @@ def build_policy_phase_by_period(period_dates, frequency, policy_df, country_cod
     if not period_dates:
         return {}
 
+    policy_lookup = _prepare_policy_lookup(policy_df)
+    if policy_lookup is None:
+        return {}
+
     freq = normalize_frequency(frequency)
     policy_map = {}
-    ordered_dates = pd.to_datetime(pd.Series(period_dates)).sort_values().tolist()
+    ordered_dates = pd.to_datetime(
+        pd.Series(period_dates),
+        errors="coerce",
+    ).dropna().sort_values().tolist()
 
     for idx, curr_ref in enumerate(ordered_dates):
         curr_key = format_period_key(curr_ref, freq)
@@ -495,8 +539,8 @@ def build_policy_phase_by_period(period_dates, frequency, policy_df, country_cod
             continue
 
         prev_ref = ordered_dates[idx - 1]
-        previous_rate = _get_policy_target_asof(policy_df, prev_ref)
-        current_rate = _get_policy_target_asof(policy_df, curr_ref)
+        previous_rate = _get_policy_target_asof(policy_lookup, prev_ref)
+        current_rate = _get_policy_target_asof(policy_lookup, curr_ref)
 
         policy_map[curr_key] = _classify_policy_phase(previous_rate, current_rate)
 

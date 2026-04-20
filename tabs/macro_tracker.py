@@ -529,13 +529,6 @@ def _build_bottom_widget_row():
 
 
 def get_layout():
-    initial_payload = get_macro_tracker_payload(
-        country="US",
-        category="ALL",
-        start_date="1970-01-01",
-        end_date=None,
-    )
-
     return dcc.Tab(
         label="경제지표 Tracker",
         children=[
@@ -622,7 +615,10 @@ def get_layout():
                                     ),
                                     html.Div(
                                         id="macro-table-container",
-                                        children=_build_tables(initial_payload, selected_series_codes=[]),
+                                        children=html.Div(
+                                            "로딩 중...",
+                                            style={"padding": "20px", "fontSize": "14px", "color": "#666"},
+                                        ),
                                     ),
                                 ],
                                 style={
@@ -680,11 +676,7 @@ def get_layout():
 def register_callbacks(app):
     app.clientside_callback(
         """
-        function(trigger_value) {
-            if (!trigger_value) {
-                return "";
-            }
-
+        function(table_children) {
             const applyScrollRight = function() {
                 const nodes = document.querySelectorAll('.macro-middle-scroll');
                 nodes.forEach(function(node) {
@@ -700,8 +692,7 @@ def register_callbacks(app):
         }
         """,
         Output("macro-scroll-done", "data"),
-        Input("macro-scroll-trigger", "data"),
-        prevent_initial_call=True,
+        Input("macro-table-container", "children"),
     )
 
     @app.callback(
@@ -807,6 +798,8 @@ def register_callbacks(app):
     @app.callback(
         Output("macro-main-chart", "figure"),
         Input("macro-selected-series-codes", "data"),
+        Input({"type": "macro-checklist", "index": ALL}, "value"),
+        Input({"type": "macro-checklist", "index": ALL}, "id"),
         Input("macro-start-date", "date"),
         Input("macro-end-date", "date"),
         Input("macro-recession-check", "value"),
@@ -815,6 +808,8 @@ def register_callbacks(app):
     )
     def update_macro_chart(
         selected_series_codes,
+        check_values,
+        check_ids,
         start_date,
         end_date,
         recession_value,
@@ -827,6 +822,14 @@ def register_callbacks(app):
             end_date = date.today().isoformat()
 
         selected_series_codes = selected_series_codes or []
+
+        direct_selected_codes = []
+        for values, comp_id in zip(check_values, check_ids):
+            if values and comp_id["index"] in values:
+                direct_selected_codes.append(comp_id["index"])
+
+        if direct_selected_codes:
+            selected_series_codes = direct_selected_codes
 
         if not selected_series_codes:
             fig = go.Figure()
