@@ -75,17 +75,30 @@ def compute_macro_regime(cli_df, cpi_df):
     df = pd.merge(cli, cpi, on="date_value", how="inner")
     df = df.sort_values("date_value").reset_index(drop=True)
 
-    df["growth"] = df["cli"].diff()
+    # -------------------------
+    # 성장 계산 방식 변경
+    # 기존: CLI MoM(diff)
+    # 변경: CLI 절대 LEVEL
+    # - CLI >= 100  -> growth_sign = +1
+    # - CLI < 100   -> growth_sign = -1
+    # -------------------------
+    df["growth"] = df["cli"]
 
+    # -------------------------
+    # 물가 계산 방식 변경
+    # 기존: CPI YoY의 (3MMA - 36MMA)
+    # 변경: CPI YoY의 3MMA 절대 LEVEL
+    # - CPI YoY 3MMA > 3%  -> infl_sign = +1
+    # - CPI YoY 3MMA <= 3% -> infl_sign = -1
+    # -------------------------
     df["cpi_yoy"] = df["cpi"].pct_change(periods=12) * 100.0
     df["cpi_yoy_3mma"] = df["cpi_yoy"].rolling(3).mean()
-    df["cpi_yoy_36mma"] = df["cpi_yoy"].rolling(36).mean()
-    df["inflation"] = df["cpi_yoy_3mma"] - df["cpi_yoy_36mma"]
+    df["inflation"] = df["cpi_yoy_3mma"]
 
     df = df.dropna(subset=["growth", "inflation"]).copy()
 
-    df["growth_sign"] = np.where(df["growth"] >= 0, 1, -1)
-    df["infl_sign"] = np.where(df["inflation"] >= 0, 1, -1)
+    df["growth_sign"] = np.where(df["growth"] >= 100.0, 1, -1)
+    df["infl_sign"] = np.where(df["inflation"] > 3.0, 1, -1)
 
     def classify(row):
         if row["growth_sign"] > 0 and row["infl_sign"] > 0:
