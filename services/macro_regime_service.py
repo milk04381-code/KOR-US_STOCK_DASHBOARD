@@ -41,6 +41,7 @@ ASSET_PROXY_LIST = [
     {"자산군": "채권", "구분": "장기국채", "ETF": "TLT"},
     {"자산군": "채권", "구분": "IG", "ETF": "LQD"},
     {"자산군": "채권", "구분": "HY", "ETF": "HYG"},
+    {"자산군": "채권", "구분": "물가연동국채", "ETF": "TIP"},
 
     {"자산군": "통화", "구분": "달러", "ETF": "UUP"},
     {"자산군": "통화", "구분": "EM FX", "ETF": "CEW"},
@@ -52,6 +53,8 @@ ASSET_PROXY_LIST = [
 
     {"자산군": "대체자산", "구분": "리츠", "ETF": "REET"},
     {"자산군": "대체자산", "구분": "인프라", "ETF": "IGF"},
+
+    {"자산군": "현금", "구분": "초단기국채", "ETF": "SGOV"},
 ]
 
 
@@ -75,22 +78,8 @@ def compute_macro_regime(cli_df, cpi_df):
     df = pd.merge(cli, cpi, on="date_value", how="inner")
     df = df.sort_values("date_value").reset_index(drop=True)
 
-    # -------------------------
-    # 성장 계산 방식 변경
-    # 기존: CLI MoM(diff)
-    # 변경: CLI 절대 LEVEL
-    # - CLI >= 100  -> growth_sign = +1
-    # - CLI < 100   -> growth_sign = -1
-    # -------------------------
     df["growth"] = df["cli"]
 
-    # -------------------------
-    # 물가 계산 방식 변경
-    # 기존: CPI YoY의 (3MMA - 36MMA)
-    # 변경: CPI YoY의 3MMA 절대 LEVEL
-    # - CPI YoY 3MMA > 3%  -> infl_sign = +1
-    # - CPI YoY 3MMA <= 3% -> infl_sign = -1
-    # -------------------------
     df["cpi_yoy"] = df["cpi"].pct_change(periods=12) * 100.0
     df["cpi_yoy_3mma"] = df["cpi_yoy"].rolling(3).mean()
     df["inflation"] = df["cpi_yoy_3mma"]
@@ -608,8 +597,6 @@ def cached_macro_regime_payload(country, start_date, end_date):
     transition_df = build_transition_matrix_df(regime_df)
     current_card = build_current_regime_card(spells)
 
-    # 핵심 최적화:
-    # ETF 가격 조회 / 월간 리샘플링을 한 번만 수행하고 아래 두 테이블이 공유
     asset_price_df = load_asset_price_dataset(effective_start, effective_end)
     asset_monthly_df = build_asset_monthly_return_df(asset_price_df)
 

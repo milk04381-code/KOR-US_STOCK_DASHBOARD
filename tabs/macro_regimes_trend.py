@@ -593,7 +593,7 @@ def get_layout():
                                             {"label": "한국", "value": "KR"},
                                             {"label": "미국", "value": "US"},
                                         ],
-                                        value="KR",
+                                        value="US",
                                         clearable=False,
                                     ),
                                 ],

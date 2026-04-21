@@ -209,6 +209,7 @@ ETF_SERIES_CONFIG = [
     make_etf_config("TLT", "2002-07-30", "TLT", "iShares 20+ Year Treasury Bond ETF"),
     make_etf_config("LQD", "2002-07-30", "LQD", "iShares iBoxx $ Investment Grade Corporate Bond ETF"),
     make_etf_config("HYG", "2007-04-04", "HYG", "iShares iBoxx $ High Yield Corporate Bond ETF"),
+    make_etf_config("TIP", "2003-12-05", "TIP", "iShares TIPS Bond ETF"),
 
     # 통화
     make_etf_config("UUP", "2007-02-20", "UUP", "Invesco DB US Dollar Index Bullish Fund"),
@@ -223,6 +224,9 @@ ETF_SERIES_CONFIG = [
     # 대체자산
     make_etf_config("REET", "2014-06-10", "REET", "iShares Global REIT ETF"),
     make_etf_config("IGF", "2007-12-12", "IGF", "iShares Global Infrastructure ETF"),
+
+    # 현금
+    make_etf_config("SGOV", "2020-05-26", "SGOV", "iShares 0-3 Month Treasury Bond ETF"),
 ]
 
 SERIES_CONFIG = BASE_SERIES_CONFIG + ETF_SERIES_CONFIG
@@ -242,11 +246,9 @@ def normalize_yahoo_columns(df):
     result = df.copy()
 
     if isinstance(result.columns, pd.MultiIndex):
-        # 예: ('Close', '^KS11') 형태
         if "Close" in result.columns.get_level_values(0):
             result = result["Close"]
             if isinstance(result, pd.DataFrame):
-                # 단일 ticker라도 DataFrame일 수 있으니 첫 컬럼 사용
                 result = result.iloc[:, 0]
             result = result.to_frame(name="Close")
         else:
